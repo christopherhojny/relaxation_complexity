@@ -1,0 +1,62 @@
+Additional information about the code for the paper
+
+   Computational Aspects of Relaxation Complexity: Possibilities and Limitations
+   by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
+
+
+I GENERAL INFORMATION
+
+This directory contains scripts to compute observers of a finite lattice-convex set X
+and its relaxation complexity rc(X). To be able to run both scripts, you need a
+working installation of Sage, and SCIP 7 together with its Python interface PySCIPOpt.
+
+Information on how to get and install Sage can be found at
+
+	    https://doc.sagemath.org/html/en/index.html
+
+SCIP can be dowloaded from
+
+     	    https://www.scipopt.org/,
+
+where you can also find installation instructions. Finally, PySCIPOpt can be found
+at
+
+	    https://github.com/scipopt/PySCIPOpt.
+
+
+II COMPUTING OBSERVERS
+
+The script
+
+     	    observers.sage
+
+provides, beside auxiliary method, the routines
+
+     	    observers_for_parity_complete_case
+	    observers_through_direct_procedure
+
+to compute all observers of X. The first method can only be used if X is partity
+complete, and runs in this case more efficiently than the second method. Moreover,
+to only compute observers in a bounding box of X, the method
+
+	    observers_in_box
+
+can be used. Information on how to call these methods can be found in the documentation
+of the script.
+
+III COMPUTING RC
+
+The script
+
+     	    rc.sage
+
+provides the methods
+
+     	    computeRC
+     	    computeRCboxapprox
+
+to compute rc(X) if the number of observers is finite. The first method uses a single
+mixed-integer programming model to compute rc(X). The second method starts by only
+considering observers in a bounding box and iteratively increases the boudning box
+until rc(X) has been found. Again, detailed information on how to call the methods
+can be found in the documentation of the script.

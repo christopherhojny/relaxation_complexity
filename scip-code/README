@@ -1,0 +1,80 @@
+Additional information about the code for the paper
+
+   Computational Aspects of Relaxation Complexity: Possibilities and Limitations
+   by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
+
+
+I STEPS OF THE CODE
+
+1. To run the program, enter
+   "bin/computeRC.$(OSTYPE).$(ARCH).$(COMP).$(OPT).$(LPS)
+   (e.g. "bin/computeRC.linux.x86_64.gnu.opt.spx2"). The first two arguments
+   are mandatory and specify the files containing the set of points X and Y
+   for which we want to compute rc(X,Y). An exemplary call is
+
+   ./bin/computeRC.linux.x86_64.gnu.opt.spx instances/testX.txt instances/testY.txt
+
+   It is also possible to provide an optional third and fourth parameter,
+   which specify an upper and lower bound on rc(X,Y), respectively. Via
+   a fifth optional parameter, one can specify a file to which the found
+   relaxation is written. If this parameter is not specified, the output
+   is just printed to screen. Additional parameters can be:
+
+   -s <setting file>
+   -t <time limit>
+   -m <mem limit>
+   -n <node limit>
+   -d <display frequency>
+
+2. We assume that the sets X and Y are encoded using the following format
+   and that X is full-dimensional:
+
+   The first row is 'npoints dimension' and encodes the number of points
+   contained in set X (or Y) and the ambient dimension of X (or Y).
+
+   The remaining rows contain the coordinates of the points in X (or Y)
+   as a whitespace separated list.
+
+   For example,
+
+   4 2
+   0 0
+   0 1
+   1 0
+   1 1
+
+   encodes the {0,1}-cube in dimension 2.
+
+3. After reading the problem, a MIP for computing rc(X,Y) is created and
+   solved. Depending on the parameter setting, a compact model, a column
+   generation procedure, or a hybrid approach (default) is used.
+
+
+II PARAMETERS FOR SETTINGS FILES
+
+There exist different parameters that can be used to change the behavior
+of the code. The most important one is
+
+rc/method = value
+
+which controls the method used to compute rc(X,Y). If value is 0,
+the compact model is used, values 1 and 2 use the column generation
+model and the hybrid model, respectively. The remaining parameters control,
+i.a., whether symmetry handling or hiding set cuts shall be used.
+A list of all parameters including a short description can be found in
+rcParams.c.
+
+
+III COMMENTS ON SOURCE FILES
+
+The source code provided in the src subdirectory consists of mostly original
+code. Only the files
+
+      pricer_pattern.c
+      pricer_pattern.h
+      cons_samediff.c
+      cons_samediff.h
+
+are minor modifications of the files provided by the SCIPOptSuite in
+its subdirectory examples/Binpacking/src. A summary of the changes can
+be found in the headers of the respective files.

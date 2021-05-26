@@ -1,0 +1,35 @@
+Additional information about the code for the paper
+
+   Computational Aspects of Relaxation Complexity: Possibilities and Limitations
+   by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
+
+
+I GENERAL INFORMATION
+
+This directory contains scripts to execute computer-aided proofs for Lemma 8 of the article
+
+Computational Aspects of Relaxation Complexity: Possibilities and Limitations
+by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
+
+To be able to run both scripts, you need a working installation of Sage.
+Information on how to get and install Sage can be found at
+
+	    https://doc.sagemath.org/html/en/index.html
+
+
+II CALLING THE SCRIPTS
+
+The script
+
+     	    3d-unimodular-sets.sage
+
+computes all lattice polytopes P (up to unimodular equivalence) in the set T3 (specified in
+the Lemma) that properly contain the standard simplex and such that the standard simplex is
+a simplex of maximum volume in P.
+
+The script
+
+     	    verify_rc_representatives.sage
+
+then verifies that the relaxation complexity of the vertex sets of all these polytopes P as
+well as of the standard simplex is 4.

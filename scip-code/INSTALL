@@ -1,0 +1,67 @@
+This file explains how to install the code, which has been used for the paper
+
+   Computational Aspects of Relaxation Complexity
+   by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
+
+Here is what you have to do to get the code running:
+
+1. Download CDD from https://github.com/cddlib/cddlib and install it. We assume
+   that environment variables (pointing to)
+
+   CDD_PATH (lib-src directory of cdd)
+   CDD_LIB_PATH (library directory of cdd)
+
+   have been set. When installing cddlib from github, these directories should
+   be /path/to/cddlib-master/lib-src and /path/to/cddlib-master/lib-src/.libs,
+   respectively.
+
+2. Download SCIP from http://scip.zib.de. We recommend to use at least version 7.0.1,
+   because the code has not been tested with older versions.
+
+3. Install SCIP and compile it as described in the INSTALL file of SCIP's main
+   directory with your individual settings. Make sure to create the necessary
+   softlinks in SCIP's lib directory.
+
+   To replicate the results from the above paper, we recommend to use the compilation
+   command "make LPS=spx OPT=opt", i.e.,
+   to use the following settings:
+     (a) LPS=spx: Use SoPlex as LP solver. For this you have to install the SoPlex,
+         which you can also find at http://scip.zib.de. If you have installed SCIP
+	 via the SCIP-OptSuite, then you also have installed SoPlex.
+     (b) OPT=opt: The code is compiled in optimized mode and runs significantly
+         faster.
+
+   On some machines, you should use gmake instead of make.
+
+4. Unpack the enclosed "computeRC-1.0.tgz" or file to a temporary folder (it contains
+   the project) or download the project from github. Probably you already did this
+   if you read this file.
+
+5. There are two options to determine the path to the SCIP directory:
+
+   - Set the environment variable SCIP_PATH to contain the path to SCIP's root
+     directory.
+
+   - Edit the MAKEFILE of the directory computeRC, edit the
+     variable SCIPDIR if necessary.  It should point to the directory
+     that contains SCIP, i.e., $SCIPDIR/lib contains the SCIP library files.
+
+6. Compile the project: In the main directory computeRC, enter exactly
+   the same compilation command as used in Step 2.
+
+7. To run the program, enter
+   "bin/computeRC.$(OSTYPE).$(ARCH).$(COMP).$(OPT).$(LPS)"
+   (e.g., "bin/computeRC.linux.x86_64.gnu.opt.spx2"). The first two arguments
+   are mandatory and specify the files containing the set of points X and Y
+   for which we want to compute rc(X,Y). It is also possible to provide
+   an optional third and fourth parameter, which specify an upper and
+   lower bound on rc(X,Y), respectively. Via a fifth optional parameter,
+   one can specify a file to which the found relaxation is written.
+   If this parameter is not specified, the output is just printed to
+   screen. Additional parameters can be:
+
+   -s <setting file>
+   -t <time limit>
+   -m <mem limit>
+   -n <node limit>
+   -d <display frequency>
