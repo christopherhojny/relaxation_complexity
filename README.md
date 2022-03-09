@@ -1,6 +1,8 @@
-This repository contains code used in the article
+This repository contains code used in the articles
 
    Computational Aspects of Relaxation Complexity: Possibilities and Limitations
+   and
+   Efficient MIP Techniques for Computing the Relaxation Complexity
    by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
 
 The repository consists of three parts, each part has its own README file

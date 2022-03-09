@@ -50,6 +50,7 @@ include $(SCIPDIR)/make/make.project
 
 LIBPATH		=	lib
 USRCFLAGS	+=      -isystem$(LIBPATH)
+USRCXXFLAGS	+=      -isystem$(LIBPATH)
 
 OPT		=	opt
 LPS		=	spx2
@@ -74,13 +75,18 @@ COMPUTERC	=	computeRC
 
 COMPUTERCOBJ	=	auxiliary_cdd.o \
 			branch_ryanfoster.o \
+			compute_symmetries.o \
 			cons_samediff.o \
+			cons_conflict.o \
 			convex_hull.o \
 			hiding_sets.o \
 			pricer_pattern.o \
 			probdata_rc_cg.o \
 			probdata_rc_compact.o \
+			probdata_rc_conflict.o \
 			problem_rc.o \
+			prop_convexity.o \
+			prop_intersection.o \
 			rcParams.o \
 			rcPlugins.o \
 			vardata_binpacking.o \
@@ -91,6 +97,7 @@ COMPUTERCOBJ	=	auxiliary_cdd.o \
 
 COMPUTERCSRC	=	auxiliary_cdd.c \
 			branch_ryanfoster.c \
+			compute_symmetries.cpp \
 			cons_samediff.c \
 			convex_hull.c \
 			hiding_sets.c \
@@ -98,6 +105,7 @@ COMPUTERCSRC	=	auxiliary_cdd.c \
 			probdata_rc_cg.c \
 			probdata_rc_compact.c \
 			problem_rc.c \
+			prop_convexity.c \
 			rcParams.c \
 			rcPlugins.c \
 			vardata_binpacking.c \
@@ -112,6 +120,7 @@ COMPUTERCDEP	  =	$(SRCDIR)/depend.$(COMPUTERC)
 COMPUTERCFILE	  =	$(BINDIR)/$(COMPUTERC).$(BASE).$(LPS)$(EXEEXTENSION)
 
 LIBCDD		=	-L$(CDD_LIB_PATH) -lcdd
+LIBBLISS	=	-L$(BLISS_LIB_PATH) -lbliss
 
 
 #-----------------------------------------------------------------------------
@@ -125,20 +134,6 @@ endif
 .PHONY: all
 all:            $(LIBDIR) $(SCIPDIR) $(COMPUTERCFILE)
 
-
-# ----------- tests -------------
-
-.PHONY: test testcluster
-test:
-	cd check; \
-	$(SHELL) ./check.sh $(TEST) $(COMPUTERCFILE) $(SETTINGS) $(notdir $(COMPUTERCFILE)).$(HOSTNAME) $(TIME) $(NODES) $(MEM) $(DISPFREQ) $(CONTINUE) $(LOCK) $(VERSION) $(LPS) $(SETCUTOFF) $(ONLYPRE);
-
-testcluster:
-	cd check; \
-	$(SHELL) ./check_cluster.sh $(TEST) $(COMPUTERCFILE) $(SETTINGS) \
-	$(notdir $(COMPUTERCFILE)).$(HOSTNAME) $(TIME) $(NODES) $(MEM) \
-	$(DISPFREQ) $(CONTINUE) $(VERSION) \
-	$(LPS) $(QUEUE) $(QUEUETYPE) $(PPN) $(CLIENTTMPDIR) $(NOWAITCLUSTER) $(PERMUTE) $(SETCUTOFF);
 
 
 # ----------- others -------------
@@ -155,6 +150,7 @@ $(BINDIR):
 $(LIBDIR):
 		@-mkdir -p lib;
 		@-ln -s $(CDD_PATH) lib/cddlib;
+		@-ln -s $(BLISS_PATH) lib/bliss;
 
 .PHONY: tags
 tags:
@@ -184,9 +180,9 @@ depend:		$(SCIPDIR)
 $(COMPUTERCFILE): $(BINDIR) $(OBJDIR) $(SCIPLIBFILE) $(LPILIBFILE) $(COMPUTERCOBJFILES)
 		@echo "-> linking $@"
 ifdef LINKCCSCIPALL
-		-$(CXX) $(COMPUTERCOBJFILES) $(LINKCCSCIPALL) $(LIBCDD) -o $@
+		-$(CXX) $(COMPUTERCOBJFILES) $(LINKCCSCIPALL) $(LIBCDD) $(LIBBLISS) -o $@
 else
-		-$(CXX) $(COMPUTERCOBJFILES) -L$(SCIPDIR)/lib -l$(SCIPLIB) -l$(OBJSCIPLIB) -l$(LPILIB) -l$(NLPILIB) $(OFLAGS) $(LPSLDFLAGS) $(LDFLAGS)  $(LIBCDD) -o $@
+		-$(CXX) $(COMPUTERCOBJFILES) -L$(SCIPDIR)/lib -l$(SCIPLIB) -l$(OBJSCIPLIB) -l$(LPILIB) -l$(NLPILIB) $(OFLAGS) $(LPSLDFLAGS) $(LDFLAGS)  $(LIBCDD) $(LIBBLISS) -o $@
 endif
 
 

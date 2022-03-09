@@ -14,6 +14,10 @@
 #include "datapoints.h"
 #include "scip/scip.h"
 
+#include "cddlib/setoper.h"
+#include "cddlib/cddmp.h"
+#include "cddlib/cdd.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -49,6 +53,24 @@ SCIP_RETCODE SCIPsolveRCproblem(
    int                   absmax,             /**< maximum absolute value of a coordinate in X */
    char*                 filename,           /**< name of file for storing solution (or NULL) */
    SCIP_Real             timelimit           /**< time limit */
+   );
+
+/** returns solution of the problem based on conv(X) */
+extern
+SCIP_RETCODE SCIPgetSolutionCompactModel(
+   SCIP*                 scip,               /**< SCIP instance */
+   SCIP_PROBDATA*        probdata,           /**< problem data */
+   SCIP_SOL*             sol,                /**< solution to be filled */
+   dd_MatrixPtr          facetsconvexhull    /**< facet description of conv(X) */
+   );
+
+/** fills existing solution of the problem based on conv(X) */
+extern
+SCIP_RETCODE SCIPgetSolutionConflictModel(
+   SCIP*                 scip,               /**< SCIP instance */
+   SCIP_PROBDATA*        probdata,           /**< problem data */
+   SCIP_SOL*             sol,                /**< solution to be filled */
+   dd_MatrixPtr          facetsconvexhull    /**< facet description of conv(X) */
    );
 
 #ifdef __cplusplus

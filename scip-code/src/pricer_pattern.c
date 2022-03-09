@@ -98,7 +98,6 @@ struct SCIP_PricerData
  * Local methods
  */
 
-
 /** add branching decisions constraints to the sub SCIP */
 static
 SCIP_RETCODE addBranchingDecisionConss(
@@ -160,7 +159,7 @@ SCIP_RETCODE addBranchingDecisionConss(
       }
       else
       {
-         SCIPerrorMessage("unknow constraint type <%d>\n, type");
+         SCIPerrorMessage("unknow constraint type <%d>\n", type);
          return SCIP_INVALIDDATA;
       }
 
@@ -244,24 +243,24 @@ SCIP_RETCODE addFixedVarsConss(
             assert( o <= consid );
             cons = conss[o];
 
-            if ( SCIPconsIsEnabled(cons) )
+            /* if the constraint is already disabled */
+            if ( o == consid && !SCIPconsIsEnabled(cons) )
             {
-               assert( SCIPgetNFixedonesSetppc(scip, cons) == 0 );
-
-               var = vars[nvars];
-               nvars++;
-               assert(var != NULL);
-
-               if ( o == consid )
-               {
-                  SCIP_CALL( SCIPgetNegatedVar(subscip, var, &var) );
-               }
-
-               logicorvars[nlogicorvars] = var;
-               nlogicorvars++;
-            }
-            else if ( o == consid )
                needed = FALSE;
+               break;
+            }
+
+            var = vars[nvars];
+            nvars++;
+            assert(var != NULL);
+
+            if ( o == consid )
+            {
+               SCIP_CALL( SCIPgetNegatedVar(subscip, var, &var) );
+            }
+
+            logicorvars[nlogicorvars] = var;
+            nlogicorvars++;
 
             if ( o == consid )
             {
@@ -336,6 +335,10 @@ SCIP_RETCODE createPricingModel(
 
    /* basic setup */
    SCIP_CALL( SCIPcreateProbBasic(subscip, "setGenerator") );
+   if ( ! atrootnode )
+   {
+      SCIP_CALL( SCIPsetEmphasis(subscip, SCIP_PARAMEMPHASIS_FEASIBILITY, TRUE) );
+   }
    SCIP_CALL( SCIPsetObjsense(subscip, SCIP_OBJSENSE_MAXIMIZE) );
 
    /* do not abort subproblem on CTRL-C */
@@ -649,21 +652,48 @@ SCIP_RETCODE SCIPsolvePricingProblem(
    int i;
    int j;
 
+   SCIP_Real cutoffbound;
+   int sollimit;
+
    *addvar = FALSE;
 
+   SCIP_CALL( SCIPgetRealParam(scip, "rc/cutoffepsilon", &cutoffbound) );
+   SCIP_CALL( SCIPgetIntParam(scip, "rc/maxsolpricer", &sollimit) );
+
    /* solve sub SCIP to find new patterns/sets for master problem  */
+   SCIP_CALL( SCIPsetObjlimit(subscip, 1.0 + cutoffbound) );
+   SCIP_CALL( SCIPsetIntParam(subscip, "limits/bestsol", sollimit) );
+
    SCIP_CALL( SCIPsolve(subscip) );
 
    /* terminate if the user has interupted the pricing problem */
    if ( SCIPpressedCtrlC(subscip) )
       return SCIP_OKAY;
 
+   /* terminate if no violated inequality has been found */
+   if ( SCIPgetStatus(subscip) == SCIP_STATUS_INFEASIBLE || SCIPgetStatus(subscip) == SCIP_STATUS_INFORUNBD )
+   {
+      SCIPdebugMsg(scip, "inequality is not violated -> no variable added\n");
+
+      return SCIP_OKAY;
+   }
+
    /* extract solution from subscip instance */
    subscipsol = SCIPgetBestSol(subscip);
+   assert( subscipsol != NULL );
+
    subscipobj = SCIPgetSolOrigObj(subscip, subscipsol);
 
-   /* terminate if no violated inequality has been found */
    if ( SCIPisLE(subscip, subscipobj, 1.0) )
+   {
+      SCIPdebugMsg(scip, "inequality is not violated -> no variable added\n");
+
+      return SCIP_OKAY;
+   }
+
+   /* terminate if no violated inequality has been found */
+   if ( SCIPgetStatus(subscip) == SCIP_STATUS_INFEASIBLE || SCIPgetStatus(subscip) == SCIP_STATUS_INFORUNBD
+      || SCIPisLE(subscip, subscipobj, 1.0) )
    {
       SCIPdebugMsg(scip, "inequality is not violated -> no variable added\n");
 
@@ -816,6 +846,7 @@ SCIP_DECL_PRICERREDCOST(pricerRedcostPattern)
    SCIP_PRICERDATA* pricerdata;
    SCIP_Bool addvar;
    SCIP_Bool atrootnode;
+   SCIP_Bool success;
 
    assert( scip != NULL );
    assert( pricer != NULL );
@@ -839,7 +870,12 @@ SCIP_DECL_PRICERREDCOST(pricerRedcostPattern)
    SCIP_CALL( SCIPsolvePricingProblem(scip, subscip, pricerdata->Y, pricerdata->nY, pricerdata->dimension,
          pricerdata->ineqvars, pricerdata->coverconss, &addvar) );
 
-   if( addvar || SCIPgetStatus(subscip) == SCIP_STATUS_OPTIMAL )
+   success = SCIPgetStatus(subscip) == SCIP_STATUS_OPTIMAL;
+   success = success || SCIPgetStatus(subscip) == SCIP_STATUS_BESTSOLLIMIT;
+   success = success || SCIPgetStatus(subscip) == SCIP_STATUS_INFEASIBLE;
+   success = success || SCIPgetStatus(subscip) == SCIP_STATUS_INFORUNBD;
+
+   if( addvar || success )
       (*result) = SCIP_SUCCESS;
 
    SCIP_CALL( freePricingModel(scip, subscip, pricerdata, atrootnode) );

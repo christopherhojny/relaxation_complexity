@@ -90,7 +90,7 @@ SCIP_RETCODE computeRC(
    }
    if ( nodeLimit < SCIP_LONGINT_MAX )
    {
-      SCIPinfoMessage(scip, 0, "Setting node limit to %ld.\n", nodeLimit);
+      SCIPinfoMessage(scip, 0, "Setting node limit to %lld.\n", nodeLimit);
       SCIP_CALL( SCIPsetLongintParam(scip, "limits/nodes", nodeLimit) );
    }
    if ( displayFreq < INT_MAX )

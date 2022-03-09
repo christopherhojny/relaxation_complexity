@@ -12,19 +12,20 @@ extern "C" {
 #endif
 
 
+/* constructs a CDD matrix containing points from a set of data points */
 extern
 dd_MatrixPtr constructGeneratorMatrixPoints(
-   Datapoints*           datapoints,
-   int*                  pointsincluster,
-   int                   npointsincluster
+   Datapoints*           datapoints,         /**< data points */
+   int*                  selectedpoints,     /**< array of selected data points */
+   int                   nselectedpoints     /**< number of selected data points */
    );
 
-
+/** computes facet description of set of points */
 extern
 dd_MatrixPtr computeConvexHullFacets(
-   SCIP*                 scip,
-   dd_MatrixPtr          generators,
-   SCIP_Bool*            success
+   SCIP*                 scip,               /**< SCIP instance */
+   dd_MatrixPtr          generators,         /**< points generating convex hull */
+   SCIP_Bool*            success             /**< pointer to store whether we were successful */
    );
 
 #ifdef __cplusplus

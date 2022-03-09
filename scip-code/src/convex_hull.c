@@ -10,10 +10,11 @@
 #include "convex_hull.h"
 
 
+/** constructs a CDD matrix containing points from a set of data points */
 dd_MatrixPtr constructGeneratorMatrixPoints(
-   Datapoints*           datapoints,
-   int*                  pointsincluster,
-   int                   npointsincluster
+   Datapoints*           datapoints,         /**< data points */
+   int*                  selectedpoints,     /**< array of selected data points */
+   int                   nselectedpoints     /**< number of selected data points */
    )
 {
    dd_MatrixPtr generators;
@@ -22,22 +23,22 @@ dd_MatrixPtr constructGeneratorMatrixPoints(
    dd_colrange j;
 
    assert( datapoints != NULL );
-   assert( pointsincluster != NULL || npointsincluster == 0 );
-   assert( npointsincluster >= 0 );
+   assert( selectedpoints != NULL || nselectedpoints == 0 );
+   assert( nselectedpoints >= 0 );
 
    /* initialize generators matrix */
    dim = datapoints->dimension + 1;
 
    /* add points (we use homogeneous coordinates, i.e., first coordinate is 1) */
-   if ( npointsincluster > 0 )
+   if ( nselectedpoints > 0 )
    {
-      generators = dd_CreateMatrix(npointsincluster, dim);
+      generators = dd_CreateMatrix(nselectedpoints, dim);
 
-      for (i = 0; i < npointsincluster; ++i)
+      for (i = 0; i < nselectedpoints; ++i)
       {
          dd_set_si(generators->matrix[i][0], 1);
          for (j = 1; j < dim; ++j)
-            dd_set_si(generators->matrix[i][j], datapoints->points[pointsincluster[i]][j-1]);
+            dd_set_si(generators->matrix[i][j], datapoints->points[selectedpoints[i]][j-1]);
       }
    }
    else
@@ -56,10 +57,11 @@ dd_MatrixPtr constructGeneratorMatrixPoints(
 }
 
 
+/** computes facet description of set of points */
 dd_MatrixPtr computeConvexHullFacets(
-   SCIP*                 scip,
-   dd_MatrixPtr          generators,
-   SCIP_Bool*            success
+   SCIP*                 scip,               /**< SCIP instance */
+   dd_MatrixPtr          generators,         /**< points generating convex hull */
+   SCIP_Bool*            success             /**< pointer to store whether we were successful */
    )
 {
    dd_PolyhedraPtr polyhedron;
@@ -85,9 +87,16 @@ dd_MatrixPtr computeConvexHullFacets(
       return NULL;
    }
 
-   *success = TRUE;
-
    facets = dd_CopyInequalities(polyhedron);
+
+   if ( set_card(facets->linset) > 0 )
+   {
+      SCIPdebugMsg(scip, "polyhedron is not full-dimensional");
+
+      return NULL;
+   }
+
+   *success = TRUE;
 
    dd_FreePolyhedra(polyhedron);
 

@@ -1,11 +1,13 @@
-This file explains how to install the code, which has been used for the paper
+This file explains how to install the code, which has been used for the papers
 
-   Computational Aspects of Relaxation Complexity
+   Computational Aspects of Relaxation Complexity: Possibilities and Limitations
+   and
+   Efficient MIP Techniques for Computing the Relaxation Complexity
    by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
 
 Here is what you have to do to get the code running:
 
-1. Download CDD from https://github.com/cddlib/cddlib and install it. We assume
+1a. Download CDD from https://github.com/cddlib/cddlib and install it. We assume
    that environment variables (pointing to)
 
    CDD_PATH (lib-src directory of cdd)
@@ -15,7 +17,15 @@ Here is what you have to do to get the code running:
    be /path/to/cddlib-master/lib-src and /path/to/cddlib-master/lib-src/.libs,
    respectively.
 
-2. Download SCIP from http://scip.zib.de. We recommend to use at least version 7.0.1,
+1b. Download bliss from http://www.tcs.hut.fi/Software/bliss/ and install it.
+   We assume that environment variables (pointing to)
+
+   BLISS_PATH (lib-src directory of bliss)
+   BLISS_LIB_PATH (library directory of bliss)
+
+   have been set.
+
+2. Download SCIP from http://scip.zib.de. We recommend to use at least version 7.0.3,
    because the code has not been tested with older versions.
 
 3. Install SCIP and compile it as described in the INSTALL file of SCIP's main
@@ -33,7 +43,7 @@ Here is what you have to do to get the code running:
 
    On some machines, you should use gmake instead of make.
 
-4. Unpack the enclosed "computeRC-1.0.tgz" or file to a temporary folder (it contains
+4. Unpack the enclosed "computeRC-2.0.tgz" or file to a temporary folder (it contains
    the project) or download the project from github. Probably you already did this
    if you read this file.
 

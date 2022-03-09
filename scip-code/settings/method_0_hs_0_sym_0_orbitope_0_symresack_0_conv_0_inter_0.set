@@ -1,0 +1,7 @@
+rc/method = 0
+rc/hidingsetcuts = FALSE
+rc/handlesymmetry = FALSE
+rc/useorbitope = FALSE
+rc/usesymresacks = FALSE
+propagating/convexity/freq = -1
+propagating/intersection/freq = -1

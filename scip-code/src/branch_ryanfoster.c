@@ -56,6 +56,10 @@ SCIP_DECL_BRANCHEXECLP(branchExeclpRyanFoster)
    int j;
    int v;
 
+   SCIP_Real maxval = -1.0;
+   int maxid1;
+   int maxid2;
+
    assert( scip != NULL );
    assert( branchrule != NULL );
    assert( strcmp(SCIPbranchruleGetName(branchrule), BRANCHRULE_NAME) == 0 );
@@ -107,9 +111,7 @@ SCIP_DECL_BRANCHEXECLP(branchExeclpRyanFoster)
    }
    npairs = npairs / 2;
 
-   /* find the first pair of patterns (i,j) such that there is an element in their intersection
-    * and their symmetric difference
-    */
+   /* find pair of sets with maximum common value in LP solution */
    for (i = 0; i < nlpcands; ++i)
    {
       SCIP_Real* inequ1;
@@ -122,6 +124,11 @@ SCIP_DECL_BRANCHEXECLP(branchExeclpRyanFoster)
 
          inequ2 = SCIPvardataGetInequality(SCIPvarGetData(lpcands[j]));
 
+         /* we can stop early if we cannot exceed the best known value maxval */
+         if ( SCIPisLE(scip, lpcandsfrac[i] + lpcandsfrac[j], maxval) )
+            break;
+
+         /* check whether sets i and j have non-empty intersection and symmetric difference */
          for (v = 0; v < nY; ++v)
          {
             SCIP_Real val1a;
@@ -161,9 +168,10 @@ SCIP_DECL_BRANCHEXECLP(branchExeclpRyanFoster)
                for (k = 0; k < dimension; ++k)
                   val2b += inequ2[k+1] * Y->points[w][k];
 
-               if ( SCIPisGE(scip, val1a, 0.0) && SCIPisGE(scip, val2a, 0.0) )
+               /* find elements in intersection (id1) and symmetric difference (id2) (if they exist) */
+               if ( SCIPisLT(scip, val1a, 0.0) && SCIPisLT(scip, val2a, 0.0) )
                   id1 = v;
-               if ( SCIPisGE(scip, val1b, 0.0) && SCIPisGE(scip, val2b, 0.0) )
+               if ( SCIPisLT(scip, val1b, 0.0) && SCIPisLT(scip, val2b, 0.0) )
                   id1 = w;
                if ( SCIPisGE(scip, val1a, 0.0) && SCIPisLT(scip, val2a, 0.0) )
                   id2 = v;
@@ -176,7 +184,18 @@ SCIP_DECL_BRANCHEXECLP(branchExeclpRyanFoster)
 
                if ( id1 != -1 && id2 != -1 )
                {
-                  assert( id1 != id2 );
+                  /* keep track of elements in intersection and symmetric difference is sets
+                   * yield larger fractional value
+                   */
+                  if ( SCIPisLT(scip, maxval, lpcandsfrac[i] + lpcandsfrac[j]) )
+                  {
+                     maxval = lpcandsfrac[i] + lpcandsfrac[j];
+                     maxid1 = id1;
+                     maxid2 = id2;
+                     id1 = -1;
+                     id2 = -1;
+                  }
+
                   break;
                }
 
@@ -191,9 +210,6 @@ SCIP_DECL_BRANCHEXECLP(branchExeclpRyanFoster)
          if ( v < nY )
             break;
       }
-
-      if ( j < nlpcands )
-         break;
    }
 
    /* create the branch-and-bound tree child nodes of the current node */
@@ -201,8 +217,8 @@ SCIP_DECL_BRANCHEXECLP(branchExeclpRyanFoster)
    SCIP_CALL( SCIPcreateChild(scip, &childdiffer, 0.0, SCIPgetLocalTransEstimate(scip)) );
 
    /* create corresponding constraints */
-   SCIP_CALL( SCIPcreateConsSamediff(scip, &conssame, "same", id1, id2, SAME, childsame, TRUE) );
-   SCIP_CALL( SCIPcreateConsSamediff(scip, &consdiffer, "differ", id1, id2, DIFFER, childdiffer, TRUE) );
+   SCIP_CALL( SCIPcreateConsSamediff(scip, &conssame, "same", maxid1, maxid2, SAME, childsame, TRUE) );
+   SCIP_CALL( SCIPcreateConsSamediff(scip, &consdiffer, "differ", maxid1, maxid2, DIFFER, childdiffer, TRUE) );
 
   /* add constraints to nodes */
    SCIP_CALL( SCIPaddConsNode(scip, childsame, conssame, NULL) );

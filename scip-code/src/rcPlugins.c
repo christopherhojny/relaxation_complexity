@@ -3,7 +3,10 @@
  * @author Christopher Hojny
  */
 
+#include "cons_conflict.h"
 #include "rcPlugins.h"
+#include "prop_convexity.h"
+#include "prop_intersection.h"
 
 #include "scip/scipdefplugins.h"
 
@@ -16,6 +19,10 @@ SCIP_RETCODE includeRCPlugins(
    assert( scip != NULL );
 
    SCIP_CALL( SCIPincludeDefaultPlugins(scip) );
+
+   SCIP_CALL( SCIPincludePropConvexity(scip) );
+   SCIP_CALL( SCIPincludePropIntersection(scip) );
+   SCIP_CALL( SCIPincludeConshdlrConflict(scip) );
 
    return SCIP_OKAY;
 }

@@ -1,6 +1,8 @@
-Additional information about the code for the paper
+Additional information about the code for the papers
 
    Computational Aspects of Relaxation Complexity: Possibilities and Limitations
+   and
+   Efficient MIP Techniques for Computing the Relaxation Complexity
    by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
 
 
@@ -47,7 +49,9 @@ I STEPS OF THE CODE
 
 3. After reading the problem, a MIP for computing rc(X,Y) is created and
    solved. Depending on the parameter setting, a compact model, a column
-   generation procedure, or a hybrid approach (default) is used.
+   generation procedure, a cutting plane model, or a hybrid approach using
+   the column generation model and one of the other two formulations is
+   used. By default, the hybrid model with the compact model is used.
 
 
 II PARAMETERS FOR SETTINGS FILES
@@ -57,12 +61,18 @@ of the code. The most important one is
 
 rc/method = value
 
-which controls the method used to compute rc(X,Y). If value is 0,
-the compact model is used, values 1 and 2 use the column generation
-model and the hybrid model, respectively. The remaining parameters control,
-i.a., whether symmetry handling or hiding set cuts shall be used.
-A list of all parameters including a short description can be found in
-rcParams.c.
+which controls the method used to compute rc(X,Y). The following values
+encode the different models:
+
+- 0: the compact model
+- 1: the column generation model
+- 2: hybrid version with compact model
+- 3: the cutting plane model
+- 4: hybrid version with cutting plane model.
+
+The remaining parameters control, i.a., whether symmetry handling or
+hiding set cuts shall be used. A list of all parameters
+including a short description can be found in rcParams.c.
 
 
 III COMMENTS ON SOURCE FILES

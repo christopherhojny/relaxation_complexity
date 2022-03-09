@@ -10,9 +10,11 @@
 
 #include <string.h>
 
+#include "compute_symmetries.h"
 #include "hiding_sets.h"
 #include "datapoints.h"
 #include "probdata_rc_compact.h"
+#include "problem_rc.h"
 #include "vardata_compact.h"
 
 #include "cddlib/setoper.h"
@@ -25,7 +27,9 @@
 #include "scip/scip.h"
 #include "scip/cons_linear.h"
 #include "scip/cons_indicator.h"
+#include "scip/cons_orbitope.h"
 #include "scip/cons_setppc.h"
+#include "scip/cons_symresack.h"
 #include "scip/cons_varbound.h"
 
 /** @brief Problem data which is accessible in all places
@@ -44,6 +48,9 @@ struct SCIP_ProbData
    int                   lb;                 /**< lower bound on RC(X,Y) */
    int                   dimension;          /**< dimension of data points */
    int                   absmaxX;            /**< maximum absolute entry of a coordinate in X */
+   int**                 perms;              /**< permutation symmetries of Y w.r.t. X */
+   int                   nperms;             /**< number of permutations stored in perms */
+   int                   nmaxperms;          /**< maximum number of permutations that fit into perms */
 
    /* data of the model */
    SCIP_VAR***           lhsvars;            /**< left-hand side variables of relaxation */
@@ -57,8 +64,9 @@ struct SCIP_ProbData
    SCIP_CONS*            objbound;           /**< constraint modeling lower bound on objective */
 
    /* advanced constraints */
+   SCIP_CONS*            orbitopecons;       /**< constraint to handle permutations of infeasible point classes */
+   SCIP_CONS**           symresackconss;     /**< constraints to handle permutations of Y */
    SCIP_CONS**           sortusedconss;      /**< constraints to enforce sorting on isusedvars */
-   SCIP_CONS**           sortfirstlhsconss;  /**< constraints to enforce sorting of lhs of first constraint */
    SCIP_CONS**           sortdifflhsconss;   /**< constraints to enforce sorting between different constraints */
    SCIP_CONS***          uppervbdconss;      /**< constraints to force upper bound on lhsvars to 0 if inequality not used */
    SCIP_CONS***          lowervbdconss;      /**< constraints to force lower bound on lhsvars to 0 if inequality not used */
@@ -84,6 +92,9 @@ SCIP_RETCODE probdataCreate(
    int                   ub,                 /**< upper bound on RC(X,Y) */
    int                   lb,                 /**< lower bound on RC(X,Y) */
    int                   absmaxX,            /**< maximum absolute entry of a coordinate in X */
+   int**                 perms,              /**< permutation symmetries of Y w.r.t. X */
+   int                   nperms,             /**< number of permutations stored in perms */
+   int                   nmaxperms,          /**< maximum number of permutations that fit into perms */
    SCIP_VAR***           lhsvars,            /**< left-hand side variables of relaxation (ub x dimension) */
    SCIP_VAR**            rhsvars,            /**< right-hand side variables of relaxation */
    SCIP_VAR***           violatedvars,       /**< variables indicating whether constraint is violated (Y x ub)*/
@@ -93,8 +104,9 @@ SCIP_RETCODE probdataCreate(
    SCIP_CONS***          linkviolconss,      /**< constraints to link violatedvars with constaints (Y x ub) */
    SCIP_CONS***          linkusedconss,      /**< constraints to link isusedvars with constraints (Y x ub) */
    SCIP_CONS*            objbound,           /**< constraint modeling lower bound on objective */
+   SCIP_CONS*            orbitopecons,       /**< constraint to handle permutations of infeasible point classes */
+   SCIP_CONS**           symresackconss,     /**< constraints to handle permutations of Y */
    SCIP_CONS**           sortusedconss,      /**< constraints to enforce sorting on isusedvars */
-   SCIP_CONS**           sortfirstlhsconss,  /**< constraints to enforce sorting of lhs of first constraint */
    SCIP_CONS**           sortdifflhsconss,   /**< constraints to enforce sorting between different constraints */
    SCIP_CONS***          uppervbdconss,      /**< constraints to force upper bound on lhsvars to 0 if inequality not used */
    SCIP_CONS***          lowervbdconss,      /**< constraints to force lower bound on lhsvars to 0 if inequality not used */
@@ -131,6 +143,8 @@ SCIP_RETCODE probdataCreate(
    (*probdata)->lb = lb;
    (*probdata)->absmaxX = absmaxX;
    (*probdata)->nhidingsetcuts = nhidingsetcuts;
+   (*probdata)->nperms = nperms;
+   (*probdata)->nmaxperms = nmaxperms;
 
    (*probdata)->objbound = objbound;
 
@@ -210,7 +224,7 @@ SCIP_RETCODE probdataCreate(
       }
    }
    else
-      linkviolconss = NULL;
+      linkusedconss = NULL;
 
    if ( uppervbdconss != NULL )
    {
@@ -255,7 +269,15 @@ SCIP_RETCODE probdataCreate(
       }
       else
          (*probdata)->sortdifflhsconss = NULL;
+
+      if ( symresackconss != NULL )
+      {
+         SCIP_CALL( SCIPduplicateBlockMemoryArray(scip, &(*probdata)->symresackconss, symresackconss, nperms) );
+      }
+      else
+         (*probdata)->symresackconss = NULL;
    }
+   (*probdata)->orbitopecons = orbitopecons;
 
    if ( hidingsetcuts != NULL )
    {
@@ -263,6 +285,17 @@ SCIP_RETCODE probdataCreate(
    }
    else
       (*probdata)->hidingsetcuts = NULL;
+
+   if ( perms != NULL )
+   {
+      SCIP_CALL( SCIPallocBlockMemoryArray(scip, &(*probdata)->perms, (*probdata)->nmaxperms) );
+      for (i = 0; i < (*probdata)->nperms; ++i)
+      {
+         SCIP_CALL( SCIPduplicateBlockMemoryArray(scip, &(*probdata)->perms[i], perms[i], (*probdata)->nY) );
+      }
+   }
+   else
+      (*probdata)->perms = NULL;
 
    return SCIP_OKAY;
 }
@@ -384,17 +417,35 @@ SCIP_RETCODE probdataFree(
    SCIP_CALL( SCIPgetBoolParam(scip, "rc/handlesymmetry", &decision) );
    if ( decision )
    {
+      SCIP_CALL( SCIPgetBoolParam(scip, "rc/useorbitope", &decision) );
+
+      if ( decision )
+      {
+         SCIP_CALL( SCIPreleaseCons(scip, &(*probdata)->orbitopecons) );
+
+         SCIP_CALL( SCIPgetBoolParam(scip, "rc/usesymresacks", &decision) );
+         if ( decision )
+         {
+            for (i = 0; i < (*probdata)->nperms; ++i)
+            {
+               SCIP_CALL( SCIPreleaseCons(scip, &(*probdata)->symresackconss[i]) );
+            }
+            SCIPfreeBlockMemoryArrayNull(scip, &(*probdata)->symresackconss, (*probdata)->nperms);
+         }
+      }
+      else
+      {
+         for (i = 0; i < ub - 1; ++i)
+         {
+            SCIP_CALL( SCIPreleaseCons(scip, &(*probdata)->sortdifflhsconss[i]) );
+         }
+         SCIPfreeBlockMemoryArrayNull(scip, &(*probdata)->sortdifflhsconss, ub - 1);
+      }
       for (i = 0; i < ub - 1; ++i)
       {
          SCIP_CALL( SCIPreleaseCons(scip, &(*probdata)->sortusedconss[i]) );
       }
       SCIPfreeBlockMemoryArrayNull(scip, &(*probdata)->sortusedconss, ub - 1);
-
-      for (i = 0; i < ub - 1; ++i)
-      {
-         SCIP_CALL( SCIPreleaseCons(scip, &(*probdata)->sortdifflhsconss[i]) );
-      }
-      SCIPfreeBlockMemoryArrayNull(scip, &(*probdata)->sortdifflhsconss, ub - 1);
    }
 
    for (i = 0; i < (*probdata)->nhidingsetcuts; ++i)
@@ -416,6 +467,11 @@ SCIP_RETCODE probdataFree(
       SCIPfreeBlockMemoryArray(scip, &(*probdata)->lhsvars[i], (*probdata)->dimension);
    }
    SCIPfreeBlockMemoryArray(scip, &(*probdata)->lhsvars, ub);
+   for (i = (*probdata)->nperms - 1; i >= 0; --i)
+   {
+      SCIPfreeBlockMemoryArray(scip, &(*probdata)->perms[i], (*probdata)->nY);
+   }
+   SCIPfreeBlockMemoryArray(scip, &(*probdata)->perms, (*probdata)->nmaxperms);
 
    /* free probdata */
    SCIPfreeBlockMemory(scip, probdata);
@@ -702,22 +758,84 @@ SCIP_RETCODE SCIPcreateConstraints(
          SCIP_CALL( SCIPaddCons(scip, probdata->sortusedconss[i]) );
       }
 
-      /* enforce that the isusedvars are sorted */
-      SCIP_CALL( SCIPallocBlockMemoryArray(scip, &(probdata->sortdifflhsconss), ub - 1) );
-      coeffs[2] = -2.0;
-      coeffs[3] = 2.0;
-      for (i = 0; i < ub - 1; ++i)
+      /* enforce that the violatedvars are sorted */
+      SCIP_CALL( SCIPgetBoolParam(scip, "rc/useorbitope", &decision) );
+      if ( decision )
       {
-         (void) SCIPsnprintf(name, SCIP_MAXSTRLEN, "sort_diff_%d", i);
+#if SCIP_VERSION >= 800
+         SCIP_CALL( SCIPcreateConsOrbitope(scip, &probdata->orbitopecons, "orbitope", probdata->violatedvars,
+               SCIP_ORBITOPETYPE_FULL, nY, ub, FALSE, FALSE, TRUE, FALSE,
+               TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE) );
+#else
+         SCIP_CALL( SCIPcreateConsOrbitope(scip, &probdata->orbitopecons, "orbitope", probdata->violatedvars,
+               SCIP_ORBITOPETYPE_FULL, nY, ub, TRUE, FALSE,
+               TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE) );
+#endif
+         SCIP_CALL( SCIPaddCons(scip, probdata->orbitopecons) );
 
-         vars[0] = probdata->lhsvars[i][0];
-         vars[1] = probdata->lhsvars[i + 1][0];
-         vars[2] = probdata->isusedvars[i];
-         vars[3] = probdata->isusedvars[i + 1];
+         /* handle symmetries of Y-points */
+         SCIP_CALL( SCIPgetBoolParam(scip, "rc/usesymresacks", &decision) );
+         if ( decision )
+         {
+            SCIP_VAR** permvars;
+            int* perm;
+            int npermvars = 0;
 
-         SCIP_CALL( SCIPcreateConsLinear(scip, &probdata->sortdifflhsconss[i], name, 4, vars, coeffs, -SCIPinfinity(scip), 0.0,
-               TRUE, TRUE, TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE) );
-         SCIP_CALL( SCIPaddCons(scip, probdata->sortdifflhsconss[i]) );
+            /* turn variable matrix into variable array */
+            SCIP_CALL( SCIPallocBufferArray(scip, &permvars, nY * dimension) );
+            SCIP_CALL( SCIPallocBufferArray(scip, &perm, nY * dimension) );
+
+            for (i = 0; i < nY; ++i)
+            {
+               for (j = 0; j < dimension; ++j)
+                  permvars[npermvars++] = probdata->violatedvars[i][j];
+            }
+            assert( npermvars == nY * dimension );
+
+            SCIP_CALL( SCIPallocBlockMemoryArray(scip, &(probdata->symresackconss), probdata->nperms) );
+
+            for (i = 0; i < probdata->nperms; ++i)
+            {
+               int k;
+               npermvars = 0;
+
+               (void) SCIPsnprintf(name, SCIP_MAXSTRLEN, "symresack_%d", i);
+
+               /* construct corresponding permutation */
+               for (j = 0; j < nY; ++j)
+               {
+                  for (k = 0; k < dimension; ++k)
+                     perm[npermvars++] = probdata->perms[i][j] * dimension + k;
+               }
+               assert( npermvars == nY * dimension );
+
+               SCIP_CALL( SCIPcreateSymbreakCons(scip, &probdata->symresackconss[i], name, perm, permvars, npermvars,
+                     FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE) );
+               SCIP_CALL( SCIPaddCons(scip, probdata->symresackconss[i]) );
+            }
+
+            SCIPfreeBufferArray(scip, &perm);
+            SCIPfreeBufferArray(scip, &permvars);
+         }
+      }
+      else
+      {
+         SCIP_CALL( SCIPallocBlockMemoryArray(scip, &(probdata->sortdifflhsconss), ub - 1) );
+         coeffs[2] = -2.0;
+         coeffs[3] = 2.0;
+         for (i = 0; i < ub - 1; ++i)
+         {
+            (void) SCIPsnprintf(name, SCIP_MAXSTRLEN, "sort_diff_%d", i);
+
+            vars[0] = probdata->lhsvars[i][0];
+            vars[1] = probdata->lhsvars[i + 1][0];
+            vars[2] = probdata->isusedvars[i];
+            vars[3] = probdata->isusedvars[i + 1];
+
+            SCIP_CALL( SCIPcreateConsLinear(scip, &probdata->sortdifflhsconss[i], name, 4, vars, coeffs, -SCIPinfinity(scip), 0.0,
+                  TRUE, TRUE, TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE) );
+            SCIP_CALL( SCIPaddCons(scip, probdata->sortdifflhsconss[i]) );
+         }
       }
    }
 
@@ -767,37 +885,6 @@ SCIP_RETCODE SCIPcreateConstraints(
 }
 
 
-/** computes the number of facets of the convex hull of integer points */
-static
-int getNFacetsConvexHull(
-   SCIP*                 scip,               /**< SCIP instance */
-   Datapoints*           X                   /**< set of integer points */
-   )
-{
-   dd_MatrixPtr generators;
-   dd_MatrixPtr facetsconvexhull;
-   SCIP_Bool success;
-   int nfacets = INT_MAX;
-
-   assert( scip != NULL );
-   assert( X != NULL );
-
-   dd_set_global_constants();
-   generators = constructGeneratorMatrixPoints(X, NULL, 0);
-
-   facetsconvexhull = computeConvexHullFacets(scip, generators, &success);
-
-   dd_FreeMatrix(generators);
-
-   if ( success )
-      nfacets = facetsconvexhull->rowsize;
-
-   dd_free_global_constants();
-
-   return nfacets;
-}
-
-
 /**@} */
 
 /**@name Callback methods of problem data
@@ -837,10 +924,11 @@ SCIP_DECL_PROBTRANS(probtransRCcompact)
 
    /* create transform probdata */
    SCIP_CALL( probdataCreate(scip, targetdata, sourcedata->X, sourcedata->Y, ub, lb, sourcedata->absmaxX,
+         sourcedata->perms, sourcedata->nperms, sourcedata->nmaxperms,
          sourcedata->lhsvars, sourcedata->rhsvars, sourcedata->violatedvars, sourcedata->isusedvars,
          sourcedata->validconss, sourcedata->violationconss, sourcedata->linkviolconss, sourcedata->linkusedconss,
-         sourcedata->objbound, sourcedata->sortusedconss, sourcedata->sortfirstlhsconss, sourcedata->sortdifflhsconss,
-         sourcedata->uppervbdconss, sourcedata->lowervbdconss, sourcedata->rhsvbdconss,
+         sourcedata->objbound, sourcedata->orbitopecons, sourcedata->symresackconss, sourcedata->sortusedconss,
+         sourcedata->sortdifflhsconss, sourcedata->uppervbdconss, sourcedata->lowervbdconss, sourcedata->rhsvbdconss,
          sourcedata->hidingsetcuts, sourcedata->nhidingsetcuts) );
 
    /* transform all constraints */
@@ -871,8 +959,22 @@ SCIP_DECL_PROBTRANS(probtransRCcompact)
    SCIP_CALL( SCIPgetBoolParam(scip, "rc/handlesymmetry", &decision) );
    if ( decision )
    {
+      SCIP_CALL( SCIPgetBoolParam(scip, "rc/useorbitope", &decision) );
+      if ( decision )
+      {
+         SCIP_CALL( SCIPtransformCons(scip, (*targetdata)->orbitopecons, &(*targetdata)->orbitopecons) );
+
+         SCIP_CALL( SCIPgetBoolParam(scip, "rc/usesymresacks", &decision) );
+         if ( decision )
+         {
+            SCIP_CALL( SCIPtransformConss(scip, (*targetdata)->nperms, (*targetdata)->symresackconss, (*targetdata)->symresackconss) );
+         }
+      }
+      else
+      {
+         SCIP_CALL( SCIPtransformConss(scip, ub - 1, (*targetdata)->sortdifflhsconss, (*targetdata)->sortdifflhsconss) );
+      }
       SCIP_CALL( SCIPtransformConss(scip, ub - 1, (*targetdata)->sortusedconss, (*targetdata)->sortusedconss) );
-      SCIP_CALL( SCIPtransformConss(scip, ub - 1, (*targetdata)->sortdifflhsconss, (*targetdata)->sortdifflhsconss) );
    }
 
    SCIP_CALL( SCIPtransformConss(scip, sourcedata->nhidingsetcuts, (*targetdata)->hidingsetcuts, (*targetdata)->hidingsetcuts) );
@@ -941,6 +1043,15 @@ SCIP_RETCODE SCIPprobdataCreateCompact(
    )
 {
    SCIP_PROBDATA* probdata;
+   dd_MatrixPtr generators;
+   dd_MatrixPtr facetsconvexhull;
+   SCIP_Bool decision;
+   SCIP_Bool decision2;
+   SCIP_Bool ubcomputed = FALSE;
+   int** perms = NULL;
+   int nperms = 0;
+   int nmaxperms = 0;
+   int i;
 
    assert( scip != NULL );
    assert( X != NULL );
@@ -963,17 +1074,59 @@ SCIP_RETCODE SCIPprobdataCreateCompact(
 
    /* compute upper bound if trivial upper bound is given */
    if ( *ub == INT_MAX )
-      *ub = getNFacetsConvexHull(scip, X);
+   {
+      dd_set_global_constants();
+      generators = constructGeneratorMatrixPoints(X, NULL, 0);
+
+      facetsconvexhull = computeConvexHullFacets(scip, generators, &ubcomputed);
+
+      dd_FreeMatrix(generators);
+
+      if ( ubcomputed )
+         *ub = facetsconvexhull->rowsize;
+      else
+         dd_free_global_constants();
+   }
+
+   SCIP_CALL( SCIPgetBoolParam(scip, "rc/handlesymmetry", &decision) );
+   SCIP_CALL( SCIPgetBoolParam(scip, "rc/usesymresacks", &decision2) );
+   if ( decision && decision2 )
+   {
+      SCIP_CALL( computeSymmetries(scip, X, Y, &perms, &nperms, &nmaxperms) );
+   }
 
    /* create problem data */
-   SCIP_CALL( probdataCreate(scip, &probdata, X, Y, *ub, lb,  absmaxX,
-         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0) );
+   SCIP_CALL( probdataCreate(scip, &probdata, X, Y, *ub, lb,  absmaxX, perms, nperms, nmaxperms,
+         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0) );
 
    SCIP_CALL( SCIPcreateVariables(scip, probdata, absmaxX) );
    SCIP_CALL( SCIPcreateConstraints(scip, probdata) );
 
    /* set user problem data */
    SCIP_CALL( SCIPsetProbData(scip, probdata) );
+
+   /* free original permutations (are copied by probdataCreate()) */
+   for (i = 0; i < nperms; ++i)
+   {
+      SCIPfreeBlockMemoryArrayNull(scip, &perms[i], Y->ndatapoints);
+   }
+   SCIPfreeBlockMemoryArrayNull(scip, &perms, nmaxperms);
+
+   /* compute initial solution */
+   if ( ubcomputed )
+   {
+      SCIP_SOL* sol;
+      SCIP_Bool stored;
+
+      SCIP_CALL( SCIPcreateOrigSol(scip, &sol, NULL) );
+
+      SCIP_CALL( SCIPgetSolutionCompactModel(scip, probdata, sol, facetsconvexhull) );
+
+      SCIP_CALL( SCIPaddSol(scip, sol, &stored) );
+      SCIP_CALL( SCIPfreeSol(scip, &sol) );
+
+      dd_free_global_constants();
+   }
 
    return SCIP_OKAY;
 }
