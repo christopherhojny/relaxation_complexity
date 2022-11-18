@@ -6,8 +6,8 @@
   *                  This file is part of the program and library             *
   *         SCIP --- Solving Constraint Integer Programs                      *
   *                                                                           *
-  *    Copyright (C) 2002-2021 Konrad-Zuse-Zentrum                            *
-  *                            fuer Informationstechnik Berlin                *
+  *    Copyright (C) 2002-2021 Zuse Institute Berlin                          *
+  *                                                                           *
   *                                                                           *
   *  SCIP is distributed under the terms of the ZIB Academic License.         *
   *                                                                           *

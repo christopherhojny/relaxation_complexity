@@ -1,0 +1,29 @@
+######################
+November 18, 2022
+######################
+
+Features
+--------
+
+- added heuristics to find solutions for rc_eps(X,Y)
+
+Fixed bugs
+----------
+
+- fixed bug in providing solutions to a MIP model
+- disable restarts and cut separation for column generation based models
+
+
+######################
+March 9, 2022
+######################
+
+- added code used for the paper "Efficient MIP Techniques for Computing the Relaxation Complexity"
+  by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura
+
+######################
+May 26, 2021
+######################
+
+- added code used for the paper "Computational Aspects of Relaxation Complexity: Possibilities and Limitations"
+  by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura

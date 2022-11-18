@@ -1,3 +1,26 @@
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/*                                                                           */
+/*    This file is part of the program computeRC                             */
+/*                                                                           */
+/*    an implementation of a branch-and-cut and branch-and-price             */
+/*    algorithm to compute the epsilon relaxation complexity of              */
+/*    a full-dimensional lattice-convex set X and a finite set               */
+/*    of points Y.                                                           */
+/*                                                                           */
+/*    Copyright (C) 2022-     Gennadiy Averkov, Christopher Hojny,           */
+/*                            Matthias Schymura                              */
+/*                                                                           */
+/*                                                                           */
+/*    Based on SCIP  --- Solving Constraint Integer Programs                 */
+/*                                                                           */
+/*    Copyright (C) 2002-2022 Zuse Institute Berlin                          */
+/*                                                                           */
+/*       mailto: scip@zib.de                                                 */
+/*       Licensed under the Apache License, Version 2.0                      */
+/*                                                                           */
+/*                                                                           */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
 /**@file   problem_clustering.h
  * @brief  Problem data for computing RC
  * @author Christopher Hojny
@@ -31,7 +54,9 @@ SCIP_RETCODE SCIPcreateModel(
    int*                  ub,                 /**< pointer to upper bound on RC(X,Y) */
    int                   lb,                 /**< lower bound on RC(X,Y) */
    int                   absmax,             /**< maximum absolute value of a coordinate in X */
-   SCIP_Bool             secondphase         /**< whether we are in the second phase of the hybrid approach */
+   SCIP_Bool             secondphase,        /**< whether we are in the second phase of the hybrid approach */
+   SCIP_Real*            heurtime,           /**< pointer to store time spent in heuristics */
+   SCIP_Bool*            success             /**< pointer to store whether model could be built successfully */
    );
 
 /** free problem data */
@@ -55,22 +80,46 @@ SCIP_RETCODE SCIPsolveRCproblem(
    SCIP_Real             timelimit           /**< time limit */
    );
 
-/** returns solution of the problem based on conv(X) */
+/** returns solution of the problem based on conv(X) based on CDD representation */
 extern
-SCIP_RETCODE SCIPgetSolutionCompactModel(
+SCIP_RETCODE SCIPgetSolutionCompactModelCDD(
    SCIP*                 scip,               /**< SCIP instance */
    SCIP_PROBDATA*        probdata,           /**< problem data */
    SCIP_SOL*             sol,                /**< solution to be filled */
    dd_MatrixPtr          facetsconvexhull    /**< facet description of conv(X) */
    );
 
-/** fills existing solution of the problem based on conv(X) */
+/** fills existing solution of the problem based on explicit solution */
 extern
-SCIP_RETCODE SCIPgetSolutionConflictModel(
+SCIP_RETCODE SCIPgetSolutionCompactModelExplicit(
+   SCIP*                 scip,               /**< SCIP instance */
+   SCIP_PROBDATA*        probdata,           /**< problem data */
+   SCIP_SOL*             sol,                /**< solution to be filled */
+   SCIP_Real**           inequalities,       /**< allocated array to store inequalities */
+   int**                 separatedpoints,    /**< allocated array to store separated points per inequality */
+   int*                  nseparatedpoints,   /**< allocated array to store number of separated points per inequality */
+   int                   ninequalities       /**< number of inequalities encoded in previous data structures */
+   );
+
+/** fills existing solution of the problem based on conv(X) based on CDD representation */
+extern
+SCIP_RETCODE SCIPgetSolutionConflictModelCDD(
    SCIP*                 scip,               /**< SCIP instance */
    SCIP_PROBDATA*        probdata,           /**< problem data */
    SCIP_SOL*             sol,                /**< solution to be filled */
    dd_MatrixPtr          facetsconvexhull    /**< facet description of conv(X) */
+   );
+
+/** fills existing solution of the problem based on explicit solution */
+extern
+SCIP_RETCODE SCIPgetSolutionConflictModelExplicit(
+   SCIP*                 scip,               /**< SCIP instance */
+   SCIP_PROBDATA*        probdata,           /**< problem data */
+   SCIP_SOL*             sol,                /**< solution to be filled */
+   SCIP_Real**           inequalities,       /**< allocated array to store inequalities */
+   int**                 separatedpoints,    /**< allocated array to store separated points per inequality */
+   int*                  nseparatedpoints,   /**< allocated array to store number of separated points per inequality */
+   int                   ninequalities       /**< number of inequalities encoded in previous data structures */
    );
 
 #ifdef __cplusplus

@@ -1,4 +1,33 @@
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/*                                                                           */
+/*    This file is part of the program computeRC                             */
+/*                                                                           */
+/*    an implementation of a branch-and-cut and branch-and-price             */
+/*    algorithm to compute the epsilon relaxation complexity of              */
+/*    a full-dimensional lattice-convex set X and a finite set               */
+/*    of points Y.                                                           */
+/*                                                                           */
+/*    Copyright (C) 2022-     Gennadiy Averkov, Christopher Hojny,           */
+/*                            Matthias Schymura                              */
+/*                                                                           */
+/*                                                                           */
+/*    Based on SCIP  --- Solving Constraint Integer Programs                 */
+/*                                                                           */
+/*    Copyright (C) 2002-2022 Zuse Institute Berlin                          */
+/*                                                                           */
+/*       mailto: scip@zib.de                                                 */
+/*       Licensed under the Apache License, Version 2.0                      */
+/*                                                                           */
+/*                                                                           */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+/**@file   convex_hull.c
+ * @brief  implements the setup of the basic models
+ * @author Christopher Hojny
+ */
+
 #include <stdio.h>
+#include <time.h>
 
 #include <scip/scip.h>
 #include "scip/cons_indicator.h"
@@ -18,6 +47,7 @@
 #include "branch_ryanfoster.h"
 #include "cons_conflict.h"
 #include "cons_samediff.h"
+#include "maximal_separation.h"
 #include "pricer_pattern.h"
 #include "problem_rc.h"
 #include "probdata_rc_cg.h"
@@ -198,7 +228,10 @@ SCIP_RETCODE writeSolutionCG(
    assert( probdata != NULL );
 
    if ( filename == 0 )
+   {
+      printf("\nBest solution found:\n");
       display = TRUE;
+   }
    else
       fp = fopen(filename, "w");
 
@@ -263,7 +296,10 @@ SCIP_RETCODE writeSolutionCompact(
    assert( probdata != NULL );
 
    if ( filename == 0 )
+   {
       display = TRUE;
+      printf("\nBest solution found:\n");
+   }
    else
       fp = fopen(filename, "w");
 
@@ -404,7 +440,10 @@ SCIP_RETCODE writeSolutionConflict(
    assert( violatedvars != NULL );
 
    if ( filename == 0 )
+   {
       display = TRUE;
+      printf("\nBest solution found:\n");
+   }
    else
       fp = fopen(filename, "w");
 
@@ -451,19 +490,37 @@ SCIP_RETCODE SCIPcreateModel(
    int*                  ub,                 /**< pointer to upper bound on RC(X,Y) */
    int                   lb,                 /**< lower bound on RC(X,Y) */
    int                   absmaxX,            /**< maximum absolute value of a coordinate in X */
-   SCIP_Bool             secondphase         /**< whether we are in the second phase of the hybrid approach */
+   SCIP_Bool             secondphase,        /**< whether we are in the second phase of the hybrid approach */
+   SCIP_Real*            heurtime,           /**< pointer to store time spent in heuristics */
+   SCIP_Bool*            success             /**< pointer to store whether model could be built successfully */
    )
 {
+   dd_MatrixPtr generators;
+   dd_MatrixPtr facetsconvexhull;
+   SCIP_Real timelimit;
    int method;
+   int allocub;
+   int i;
+   int j;
+   int k;
    SCIP_Bool dopreprocessing;
+   SCIP_Real** inequalities = NULL;
+   int** separatedpoints = NULL;
+   int* nseparatedpoints = NULL;
+   int ninequalities = -1;
 
    assert( scip != NULL );
    assert( X != NULL );
    assert( Y != NULL );
    assert( ub != NULL );
    assert( *ub > 0 );
+   assert( heurtime != NULL || secondphase );
+   assert( success != NULL );
+
+   *success = TRUE;
 
    SCIP_CALL( SCIPgetBoolParam(scip, "rc/preprocessing", &dopreprocessing) );
+   SCIP_CALL( SCIPgetRealParam(scip, "limits/time", &timelimit) );
 
    if ( ! secondphase && dopreprocessing )
    {
@@ -472,13 +529,182 @@ SCIP_RETCODE SCIPcreateModel(
 
    SCIP_CALL( SCIPgetIntParam(scip, "rc/method", &method) );
 
+   if ( ! secondphase )
+   {
+      clock_t starttime;
+      clock_t endtime;
+      SCIP_Real usedtime;
+      SCIP_Bool ubcomputed;
+      int tmpninequalities;
+      SCIP_Real eps;
+
+      SCIP_CALL( SCIPgetRealParam(scip, "rc/epsilon", &eps) );
+
+      /*
+       * compute initial solutions
+       */
+      *heurtime = 0.0;
+
+      SCIPinfoMessage(scip, NULL, "   compute facet description of conv(X)\n");
+      starttime = clock();
+
+      /* facet description */
+      dd_set_global_constants();
+      generators = constructGeneratorMatrixPoints(X, NULL, 0);
+
+      facetsconvexhull = computeConvexHullFacets(scip, generators, &ubcomputed);
+
+      dd_FreeMatrix(generators);
+      endtime = clock();
+      usedtime = (SCIP_Real) (endtime - starttime) / CLOCKS_PER_SEC;
+      *heurtime += usedtime;
+      timelimit -= usedtime;
+
+      if ( SCIPisLT(scip, timelimit, 0.0) )
+      {
+         SCIPinfoMessage(scip, NULL, "time limit hit during computation of facets of conv(X)\n");
+         *success = FALSE;
+
+         return SCIP_OKAY;
+      }
+
+      if ( ubcomputed && facetsconvexhull->rowsize < *ub)
+      {
+         *ub = facetsconvexhull->rowsize;
+         SCIPinfoMessage(scip, NULL, "   facet computation successful, found heuristic solution with %d inequalities in %.1fs\n",
+            *ub, usedtime);
+      }
+      else
+      {
+         dd_free_global_constants();
+         ubcomputed = FALSE;
+         SCIPinfoMessage(scip, NULL, "   facet computation finished, did not find better solution in %.1fs\n",
+            usedtime);
+      }
+
+      /* prepare memory to store greedy solution */
+      *ub = MIN(*ub, Y->ndatapoints);
+      allocub = *ub;
+
+      SCIP_CALL( SCIPallocBufferArray(scip, &inequalities, *ub) );
+      for (i = 0; i < *ub; ++i)
+      {
+         SCIP_CALL( SCIPallocBufferArray(scip, &inequalities[i], X->dimension + 1) );
+      }
+      SCIP_CALL( SCIPallocBufferArray(scip, &separatedpoints, *ub) );
+      for (i = 0; i < *ub; ++i)
+      {
+         SCIP_CALL( SCIPallocBufferArray(scip, &separatedpoints[i], Y->ndatapoints) );
+      }
+      SCIP_CALL( SCIPallocBufferArray(scip, &nseparatedpoints, *ub) );
+
+#if 0
+      /* compute greedy solution based on standard order */
+      SCIPinfoMessage(scip, NULL, "   compute greedy solution based on standard order\n");
+      starttime = clock();
+
+      ninequalities = -1;
+      tmpninequalities = -1;
+      SCIP_CALL( heurGreedy(scip, X, Y, X->ndatapoints, Y->ndatapoints, X->dimension, absmaxX, *ub,
+            GREEDY_SORT_STANDARD, method, inequalities, separatedpoints, nseparatedpoints, &tmpninequalities,
+            ubcomputed ? facetsconvexhull : NULL, timelimit) );
+      endtime = clock();
+      usedtime = (SCIP_Real) (endtime - starttime) / CLOCKS_PER_SEC;
+      *heurtime += usedtime;
+      timelimit -= usedtime;
+
+      if ( tmpninequalities > 0 )
+      {
+         /* we have found a better solution, because tmpninequalities is positive */
+         SCIPinfoMessage(scip, NULL, "   standard greedy found solution with %d inequalities in %.1fs\n",
+            tmpninequalities, usedtime);
+         *ub = tmpninequalities;
+         ninequalities = tmpninequalities;
+      }
+      else
+         SCIPinfoMessage(scip, NULL, "   standard greedy did not find a better solution in %.1fs\n",
+            usedtime);
+
+      if ( SCIPisLT(scip, timelimit, 0.0) )
+      {
+         SCIPinfoMessage(scip, NULL, "time limit hit during standard greedy\n");
+         *success = FALSE;
+
+         goto FREEMEMORY;
+      }
+#endif
+
+      SCIPinfoMessage(scip, NULL, "   compute greedy solution based on lattice distance order\n");
+      starttime = clock();
+
+      tmpninequalities = -1;
+      SCIP_CALL( heurGreedy(scip, X, Y, X->ndatapoints, Y->ndatapoints, X->dimension, absmaxX, *ub,
+            GREEDY_SORT_DISTANCE, method, inequalities, separatedpoints, nseparatedpoints, &tmpninequalities,
+            ubcomputed ? facetsconvexhull : NULL, timelimit) );
+      endtime = clock();
+      usedtime = (SCIP_Real) (endtime - starttime) / CLOCKS_PER_SEC;
+      *heurtime += usedtime;
+      timelimit -= usedtime;
+
+      if ( tmpninequalities > 0 )
+      {
+         /* we have found a better solutoin, because tmpninequalities is positive */
+         SCIPinfoMessage(scip, NULL, "   lattice distance greedy found solution with %d inequalities in %.1fs\n",
+            tmpninequalities, usedtime);
+         *ub = tmpninequalities;
+         ninequalities = tmpninequalities;
+      }
+      else
+         SCIPinfoMessage(scip, NULL, "   lattice distance greedy did not find a better solution in %.1fs\n",
+            usedtime);
+
+      if ( SCIPisLT(scip, timelimit, 0.0) )
+      {
+         SCIPinfoMessage(scip, NULL, "time limit hit during standard greedy\n");
+         *success = FALSE;
+
+         goto FREEMEMORY;
+      }
+
+      /* store facet solution if it is better than the best greedy solution */
+      if ( ubcomputed && facetsconvexhull->rowsize <= *ub
+         && (facetsconvexhull->rowsize < ninequalities || ninequalities < 0) )
+      {
+         for (i = 0; i < facetsconvexhull->rowsize; ++i)
+         {
+            for (j = 0; j < facetsconvexhull->colsize; ++j)
+               inequalities[i][j] = getReal(facetsconvexhull->matrix[i][j]);
+         }
+         ninequalities = facetsconvexhull->rowsize;
+
+         for (i = 0; i < ninequalities; ++i)
+         {
+            nseparatedpoints[i] = 0;
+            for (j = 0; j < Y->ndatapoints; ++j)
+            {
+               SCIP_Real viol;
+
+               viol = inequalities[i][0];
+               for (k = 0; k < X->dimension; ++k)
+                  viol += Y->points[j][k] * inequalities[i][k + 1];
+
+               if ( SCIPisLE(scip, viol, -eps) )
+                  separatedpoints[i][nseparatedpoints[i]++] = j;
+            }
+         }
+      }
+   }
+
    if ( method == METHOD_COMPACT_MIP || (method == METHOD_HYBRID_COMPACT && secondphase) )
    {
-      SCIP_CALL( SCIPprobdataCreateCompact(scip, "name", X, Y, ub, lb, absmaxX) );
+      SCIP_CALL( SCIPprobdataCreateCompact(scip, "name", X, Y, ub, lb, absmaxX,
+            inequalities, separatedpoints, nseparatedpoints, ninequalities, allocub) );
    }
    else if ( method == METHOD_CONFLICT || (method == METHOD_HYBRID_CONFLICT && secondphase) )
    {
-      SCIP_CALL( SCIPprobdataCreateConflict(scip, "name", X, Y, ub, lb, absmaxX) );
+      /* SCIP_CALL( SCIPprobdataCreateConflict(scip, "name", X, Y, ub, lb, absmaxX) ); */
+      SCIP_CALL( SCIPprobdataCreateConflict(scip, "name", X, Y, ub, lb, absmaxX,
+            inequalities, separatedpoints, nseparatedpoints, ninequalities, allocub) );
    }
    else
    {
@@ -496,7 +722,24 @@ SCIP_RETCODE SCIPcreateModel(
          SCIP_CALL( SCIPsetIntParam(scip, "constraints/setppc/maxprerounds", 0) );
       }
 
-      SCIP_CALL( SCIPprobdataCreateCG(scip, "name", X, Y, absmaxX) );
+      SCIP_CALL( SCIPprobdataCreateCG(scip, "name", X, Y, absmaxX,
+            inequalities, separatedpoints, nseparatedpoints, ninequalities, allocub) );
+   }
+
+   if ( ! secondphase )
+   {
+   FREEMEMORY:
+      SCIPfreeBufferArray(scip, &nseparatedpoints);
+      for (i = allocub - 1; i >= 0; --i)
+      {
+         SCIPfreeBufferArray(scip, &separatedpoints[i]);
+      }
+      SCIPfreeBufferArray(scip, &separatedpoints);
+      for (i = allocub - 1; i >= 0; --i)
+      {
+         SCIPfreeBufferArray(scip, &inequalities[i]);
+      }
+      SCIPfreeBufferArray(scip, &inequalities);
    }
 
    return SCIP_OKAY;
@@ -574,6 +817,7 @@ SCIP_RETCODE SCIPsolveRCproblem(
       int j;
       int k;
       SCIP_Bool stored;
+      SCIP_Bool success;
 
       SCIP_VAR*** lhsvars;
       SCIP_VAR** rhsvars;
@@ -593,6 +837,8 @@ SCIP_RETCODE SCIPsolveRCproblem(
       SCIP_CALL( SCIPsetLongintParam(scip, "limits/nodes", 1) );
       SCIP_CALL( SCIPsetBoolParam(scip, "propagating/convexity/enabled", FALSE) );
       SCIP_CALL( SCIPsetBoolParam(scip, "propagating/intersection/enabled", FALSE) );
+      SCIP_CALL( SCIPsetIntParam(scip,"presolving/maxrestarts", 0) );
+      SCIP_CALL( SCIPsetSeparating(scip, SCIP_PARAMSETTING_OFF, TRUE) );
 
       SCIP_CALL( SCIPsolve(scip) );
 
@@ -623,13 +869,15 @@ SCIP_RETCODE SCIPsolveRCproblem(
       SCIP_CALL( setSCIPParameters(newscip) );
       SCIP_CALL( addRCParameters(newscip) );
       SCIP_CALL( SCIPcopyParamSettings(scip, newscip) );
+      SCIP_CALL( SCIPsetIntParam(newscip,"presolving/maxrestarts", -1) );
       SCIP_CALL( SCIPsetRealParam(newscip, "limits/time", newtimelimit) );
       SCIP_CALL( SCIPsetLongintParam(newscip, "limits/nodes", -1) );
 
       newlb = (int) MAX(SCIPceil(scip, dualbound), lb);
       newub = (int) MIN(SCIPfloor(scip, primalbound), ub);
 
-      SCIP_CALL( SCIPcreateModel(newscip, X, Y, &newub, newlb, absmaxX, TRUE) );
+      SCIP_CALL( SCIPcreateModel(newscip, X, Y, &newub, newlb, absmaxX, TRUE, NULL, &success) );
+      assert( success );
 
       /* copy solution */
       newprobdata = SCIPgetProbData(newscip);
@@ -705,7 +953,9 @@ SCIP_RETCODE SCIPsolveRCproblem(
 
                /* compute -ay + b: note, stored inequality is already in shape b - ax >= 0 */
                for (k = 0; k < dimension; ++k)
+               {
                   slackval += inequality[k+1] * Y->points[i][k];
+               }
                slackval += inequality[0];
 
                SCIP_CALL( SCIPsetSolVal(newscip, newsol, var, MAX(slackval, 0.0)) );
@@ -747,6 +997,7 @@ SCIP_RETCODE SCIPsolveRCproblem(
       int i;
       int j;
       SCIP_Bool stored;
+      SCIP_Bool success;
 
       SCIP_VAR*** violatedvars;
       SCIP_VAR** isusedvars;
@@ -758,6 +1009,8 @@ SCIP_RETCODE SCIPsolveRCproblem(
       SCIP_CALL( SCIPsetLongintParam(scip, "limits/nodes", 1) );
       SCIP_CALL( SCIPsetBoolParam(scip, "propagating/convexity/enabled", FALSE) );
       SCIP_CALL( SCIPsetBoolParam(scip, "propagating/intersection/enabled", FALSE) );
+      SCIP_CALL( SCIPsetIntParam(scip,"presolving/maxrestarts", 0) );
+      SCIP_CALL( SCIPsetSeparating(scip, SCIP_PARAMSETTING_OFF, TRUE) );
 
       SCIP_CALL( SCIPsolve(scip) );
 
@@ -788,13 +1041,15 @@ SCIP_RETCODE SCIPsolveRCproblem(
       SCIP_CALL( setSCIPParameters(newscip) );
       SCIP_CALL( addRCParameters(newscip) );
       SCIP_CALL( SCIPcopyParamSettings(scip, newscip) );
+      SCIP_CALL( SCIPsetIntParam(newscip,"presolving/maxrestarts", 0) );
       SCIP_CALL( SCIPsetRealParam(newscip, "limits/time", newtimelimit) );
       SCIP_CALL( SCIPsetLongintParam(newscip, "limits/nodes", -1) );
 
       newlb = (int) MAX(SCIPceil(scip, dualbound), lb);
       newub = (int) MIN(SCIPfloor(scip, primalbound), ub);
 
-      SCIP_CALL( SCIPcreateModel(newscip, X, Y, &newub, newlb, absmaxX, TRUE) );
+      SCIP_CALL( SCIPcreateModel(newscip, X, Y, &newub, newlb, absmaxX, TRUE, NULL, &success) );
+      assert( success );
 
       /* copy solution */
       newprobdata = SCIPgetProbData(newscip);
@@ -866,6 +1121,13 @@ SCIP_RETCODE SCIPsolveRCproblem(
          SCIP_CALL( SCIPsetBoolParam(scip, "propagating/convexity/enabled", TRUE) );
          SCIP_CALL( SCIPsetBoolParam(scip, "propagating/intersection/enabled", TRUE) );
       }
+      else
+      {
+         SCIP_CALL( SCIPsetBoolParam(scip, "propagating/convexity/enabled", FALSE) );
+         SCIP_CALL( SCIPsetBoolParam(scip, "propagating/intersection/enabled", FALSE) );
+         SCIP_CALL( SCIPsetIntParam(scip,"presolving/maxrestarts", 0) );
+         SCIP_CALL( SCIPsetSeparating(scip, SCIP_PARAMSETTING_OFF, TRUE) );
+      }
 
       /* use static orbitopes to avoid conflicts with prop_convexity */
       /* SCIP_CALL( SCIPsetBoolParam(scip, "constraints/orbitope/usedynamicprop", FALSE) ); */
@@ -893,8 +1155,8 @@ SCIP_RETCODE SCIPsolveRCproblem(
    return SCIP_OKAY;
 }
 
-/** fills existing solution of the problem based on conv(X) */
-SCIP_RETCODE SCIPgetSolutionCompactModel(
+/** fills existing solution of the problem based on conv(X) based on CDD representation */
+SCIP_RETCODE SCIPgetSolutionCompactModelCDD(
    SCIP*                 scip,               /**< SCIP instance */
    SCIP_PROBDATA*        probdata,           /**< problem data */
    SCIP_SOL*             sol,                /**< solution to be filled */
@@ -969,7 +1231,7 @@ SCIP_RETCODE SCIPgetSolutionCompactModel(
          for (k = 0; k < dim; ++k)
             val += getReal(facetsconvexhull->matrix[j][k+1]) * Y->points[i][k];
 
-         if ( SCIPisLT(scip, val, 0.0) )
+         if ( SCIPisLE(scip, val, -eps) )
          {
             SCIP_CALL( SCIPsetSolVal(scip, sol, violatedvars[i][j], 1.0) );
          }
@@ -984,9 +1246,117 @@ SCIP_RETCODE SCIPgetSolutionCompactModel(
    return SCIP_OKAY;
 }
 
+/** fills existing solution of the problem based on explicit solution */
+SCIP_RETCODE SCIPgetSolutionCompactModelExplicit(
+   SCIP*                 scip,               /**< SCIP instance */
+   SCIP_PROBDATA*        probdata,           /**< problem data */
+   SCIP_SOL*             sol,                /**< solution to be filled */
+   SCIP_Real**           inequalities,       /**< allocated array to store inequalities */
+   int**                 separatedpoints,    /**< allocated array to store separated points per inequality */
+   int*                  nseparatedpoints,   /**< allocated array to store number of separated points per inequality */
+   int                   ninequalities       /**< number of inequalities encoded in previous data structures */
+   )
+{
+   Datapoints* Y;
+   SCIP_VAR*** lhsvars;
+   SCIP_VAR** rhsvars;
+   SCIP_VAR*** violatedvars;
+   SCIP_VAR** isusedvars;
+   SCIP_CONS*** linkviolconss;
+   SCIP_VAR* var;
+   SCIP_Real val;
+   SCIP_Real eps;
+   int nY;
+#ifndef NDEBUG
+   int ub;
+#endif
+   int dim;
+   int i;
+   int j;
+   int k;
 
-/** fills existing solution of the problem based on conv(X) */
-SCIP_RETCODE SCIPgetSolutionConflictModel(
+   assert( scip != NULL );
+   assert( probdata != NULL );
+   assert( inequalities != NULL );
+   assert( separatedpoints != NULL );
+   assert( nseparatedpoints != NULL );
+   assert( ninequalities > 0 );
+
+   lhsvars = SCIPprobdataGetLhsvars(probdata);
+   rhsvars = SCIPprobdataGetRhsvars(probdata);
+   violatedvars = SCIPprobdataGetViolatedvars(probdata);
+   isusedvars = SCIPprobdataGetUsedvars(probdata);
+   linkviolconss = SCIPprobdataGetLinkviolconss(probdata);
+   Y = SCIPprobdataCompactGetY(probdata);
+   nY = Y->ndatapoints;
+#ifndef NDEBUG
+   ub = SCIPprobdataGetUb(probdata);
+#endif
+   dim = Y->dimension;
+
+   assert( ninequalities <= ub );
+
+   SCIP_CALL( SCIPgetRealParam(scip, "rc/epsilon", &eps) );
+
+   /* set inequality variables */
+   for (i = 0; i < ninequalities; ++i)
+   {
+      SCIP_CALL( SCIPsetSolVal(scip, sol, rhsvars[i], inequalities[i][0]) );
+      for (j = 0; j < dim; ++j)
+      {
+         SCIP_CALL( SCIPsetSolVal(scip, sol, lhsvars[i][j], - inequalities[i][j+1]) );
+      }
+   }
+
+   /* set isusedvars */
+   for (i = 0; i < ninequalities; ++i)
+   {
+      SCIP_CALL( SCIPsetSolVal(scip, sol, isusedvars[i], 1.0) );
+   }
+
+   /* set violated vars and slack variable of indicator constraints */
+   for (i = 0; i < nY; ++i)
+   {
+      for (j = 0; j < ninequalities; ++j)
+      {
+         val = inequalities[j][0];
+
+         for (k = 0; k < dim; ++k)
+            val += inequalities[j][k+1] * Y->points[i][k];
+
+         if ( SCIPisLE(scip, val, -eps) )
+         {
+#ifndef NDEBUG
+            for (k = 0; k < nseparatedpoints[j]; ++k)
+            {
+               if ( separatedpoints[j][k] == i )
+                  break;
+            }
+            assert( k < nseparatedpoints[j] );
+#endif
+            SCIP_CALL( SCIPsetSolVal(scip, sol, violatedvars[i][j], 1.0) );
+         }
+         else
+         {
+#ifndef NDEBUG
+            for (k = 0; k < nseparatedpoints[j]; ++k)
+            {
+               if ( separatedpoints[j][k] == i )
+                  break;
+            }
+            assert( k == nseparatedpoints[j] );
+#endif
+            var = SCIPgetSlackVarIndicator(linkviolconss[i][j]);
+            SCIP_CALL( SCIPsetSolVal(scip, sol, var, MAX(val, 0.0) + eps) );
+         }
+      }
+   }
+
+   return SCIP_OKAY;
+}
+
+/** fills existing solution of the problem based on conv(X) based on CDD representation */
+SCIP_RETCODE SCIPgetSolutionConflictModelCDD(
    SCIP*                 scip,               /**< SCIP instance */
    SCIP_PROBDATA*        probdata,           /**< problem data */
    SCIP_SOL*             sol,                /**< solution to be filled */
@@ -997,6 +1367,7 @@ SCIP_RETCODE SCIPgetSolutionConflictModel(
    SCIP_VAR*** violatedvars;
    SCIP_VAR** isusedvars;
    SCIP_Real val;
+   SCIP_Real eps;
    int nY;
    int ub;
    int dim;
@@ -1015,6 +1386,8 @@ SCIP_RETCODE SCIPgetSolutionConflictModel(
    ub = SCIPprobdataConflictGetUb(probdata);
    dim = Y->dimension;
 
+   SCIP_CALL( SCIPgetRealParam(scip, "rc/epsilon", &eps) );
+
    /* set isusedvars */
    for (i = 0; i < ub; ++i)
    {
@@ -1031,8 +1404,87 @@ SCIP_RETCODE SCIPgetSolutionConflictModel(
          for (k = 0; k < dim; ++k)
             val += getReal(facetsconvexhull->matrix[j][k+1]) * Y->points[i][k];
 
-         if ( SCIPisLT(scip, val, 0.0) )
+         if ( SCIPisLE(scip, val, -eps) )
          {
+            SCIP_CALL( SCIPsetSolVal(scip, sol, violatedvars[i][j], 1.0) );
+         }
+      }
+   }
+
+   return SCIP_OKAY;
+}
+
+/** fills existing solution of the problem based on explicit solution */
+SCIP_RETCODE SCIPgetSolutionConflictModelExplicit(
+   SCIP*                 scip,               /**< SCIP instance */
+   SCIP_PROBDATA*        probdata,           /**< problem data */
+   SCIP_SOL*             sol,                /**< solution to be filled */
+   SCIP_Real**           inequalities,       /**< allocated array to store inequalities */
+   int**                 separatedpoints,    /**< allocated array to store separated points per inequality */
+   int*                  nseparatedpoints,   /**< allocated array to store number of separated points per inequality */
+   int                   ninequalities       /**< number of inequalities encoded in previous data structures */
+   )
+{
+   Datapoints* Y;
+   SCIP_VAR*** violatedvars;
+   SCIP_VAR** isusedvars;
+   SCIP_Real val;
+   SCIP_Real eps;
+   int nY;
+#ifndef NDEBUG
+   int ub;
+#endif
+   int dim;
+   int i;
+   int j;
+   int k;
+
+   assert( scip != NULL );
+   assert( probdata != NULL );
+   assert( inequalities != NULL );
+   assert( separatedpoints != NULL );
+   assert( nseparatedpoints != NULL );
+   assert( ninequalities > 0 );
+
+   violatedvars = SCIPprobdataConflictGetViolatedvars(probdata);
+   isusedvars = SCIPprobdataConflictGetIsusedvars(probdata);
+   Y = SCIPprobdataConflictGetY(probdata);
+   nY = Y->ndatapoints;
+#ifndef NDEBUG
+   ub = SCIPprobdataConflictGetUb(probdata);
+#endif
+   dim = Y->dimension;
+
+   assert( ninequalities <= ub );
+
+   SCIP_CALL( SCIPgetRealParam(scip, "rc/epsilon", &eps) );
+
+   /* set isusedvars */
+   for (i = 0; i < ninequalities; ++i)
+   {
+      SCIP_CALL( SCIPsetSolVal(scip, sol, isusedvars[i], 1.0) );
+   }
+
+   /* set violated vars and slack variable of indicator constraints */
+   for (i = 0; i < nY; ++i)
+   {
+      for (j = 0; j < ninequalities; ++j)
+      {
+         val = inequalities[j][0];
+
+         for (k = 0; k < dim; ++k)
+            val += inequalities[j][k+1] * Y->points[i][k];
+
+         if ( SCIPisLE(scip, val, -eps) )
+         {
+#ifndef NDEBUG
+            for (k = 0; k < nseparatedpoints[j]; ++k)
+            {
+               if ( separatedpoints[j][k] == i )
+                  break;
+            }
+            assert( k < nseparatedpoints[j] );
+#endif
             SCIP_CALL( SCIPsetSolVal(scip, sol, violatedvars[i][j], 1.0) );
          }
       }

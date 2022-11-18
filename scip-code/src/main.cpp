@@ -1,3 +1,26 @@
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/*                                                                           */
+/*    This file is part of the program computeRC                             */
+/*                                                                           */
+/*    an implementation of a branch-and-cut and branch-and-price             */
+/*    algorithm to compute the epsilon relaxation complexity of              */
+/*    a full-dimensional lattice-convex set X and a finite set               */
+/*    of points Y.                                                           */
+/*                                                                           */
+/*    Copyright (C) 2022-     Gennadiy Averkov, Christopher Hojny,           */
+/*                            Matthias Schymura                              */
+/*                                                                           */
+/*                                                                           */
+/*    Based on SCIP  --- Solving Constraint Integer Programs                 */
+/*                                                                           */
+/*    Copyright (C) 2002-2022 Zuse Institute Berlin                          */
+/*                                                                           */
+/*       mailto: scip@zib.de                                                 */
+/*       Licensed under the Apache License, Version 2.0                      */
+/*                                                                           */
+/*                                                                           */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
 /**@file   main.cpp
  * @brief  main file for computing the relaxation complexity
  * @author Christopher Hojny
@@ -6,7 +29,6 @@
 #include "rcParams.h"
 #include "rcPlugins.h"
 #include "datapoints.h"
-#include "getProblemName.h"
 #include "parseOptions.h"
 #include "readInstance.h"
 #include "problem_rc.h"
@@ -69,9 +91,6 @@ SCIP_RETCODE computeRC(
       }
    }
 
-   // initialize problem class
-   std::string problemName = getProblemName(filenameX.c_str());
-
    /* output changed parameters */
    SCIPinfoMessage(scip, 0, "Changed settings:\n");
    SCIP_CALL( SCIPwriteParams(scip, 0, FALSE, TRUE) );
@@ -105,13 +124,27 @@ SCIP_RETCODE computeRC(
    Datapoints* X;
    Datapoints* Y;
    int absmaxX;
+   SCIP_Real heurtime;
+   SCIP_Bool success;
+
    SCIP_CALL( SCIPgetBoolParam(scip, "rc/printdatainfo", &printinfo) );
    SCIP_CALL( readInstance(scip, filenameX, &X, &absmaxX, printinfo) );
    SCIP_CALL( readInstance(scip, filenameY, &Y, NULL, printinfo) );
-   SCIP_CALL( SCIPcreateModel(scip, X, Y, &ub, lb, absmaxX, FALSE) );
+   SCIP_CALL( SCIPcreateModel(scip, X, Y, &ub, lb, absmaxX, FALSE, &heurtime, &success) );
+
+   if ( ! success )
+   {
+      SCIPinfoMessage(scip, NULL, "model could not be built successfully, terminate\n");
+      return SCIP_OKAY;
+   }
+
+   SCIP_Real newtimelimit;
+   newtimelimit = MAX(0.0, timeLimit - heurtime);
+   SCIPinfoMessage(scip, 0, "Update time limit to %g.\n", newtimelimit);
+   SCIP_CALL( SCIPsetRealParam(scip, "limits/time", newtimelimit) );
 
    // solve the problem ...
-   SCIP_CALL( SCIPsolveRCproblem(scip, X, Y, ub, lb, absmaxX, relaxfilename, timeLimit) );
+   SCIP_CALL( SCIPsolveRCproblem(scip, X, Y, ub, lb, absmaxX, relaxfilename, newtimelimit) );
 
    // free data
    SCIP_CALL( SCIPfreeModel(scip, X, Y) );

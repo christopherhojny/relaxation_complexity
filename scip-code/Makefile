@@ -80,6 +80,7 @@ COMPUTERCOBJ	=	auxiliary_cdd.o \
 			cons_conflict.o \
 			convex_hull.o \
 			hiding_sets.o \
+			maximal_separation.o \
 			pricer_pattern.o \
 			probdata_rc_cg.o \
 			probdata_rc_compact.o \
@@ -91,7 +92,6 @@ COMPUTERCOBJ	=	auxiliary_cdd.o \
 			rcPlugins.o \
 			vardata_binpacking.o \
 			vardata_compact.o \
-			getProblemName.o \
 			main.o \
 			readInstance.o
 
@@ -101,6 +101,7 @@ COMPUTERCSRC	=	auxiliary_cdd.c \
 			cons_samediff.c \
 			convex_hull.c \
 			hiding_sets.c \
+			maximal_separation.c \
 			pricer_pattern.c \
 			probdata_rc_cg.c \
 			probdata_rc_compact.c \
@@ -110,7 +111,6 @@ COMPUTERCSRC	=	auxiliary_cdd.c \
 			rcPlugins.c \
 			vardata_binpacking.c \
 			vardata_compact.c \
-			getProblemName.cpp \
 			main.cpp \
 			readInstance.cpp
 

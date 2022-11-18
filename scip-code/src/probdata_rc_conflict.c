@@ -1,3 +1,26 @@
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/*                                                                           */
+/*    This file is part of the program computeRC                             */
+/*                                                                           */
+/*    an implementation of a branch-and-cut and branch-and-price             */
+/*    algorithm to compute the epsilon relaxation complexity of              */
+/*    a full-dimensional lattice-convex set X and a finite set               */
+/*    of points Y.                                                           */
+/*                                                                           */
+/*    Copyright (C) 2022-     Gennadiy Averkov, Christopher Hojny,           */
+/*                            Matthias Schymura                              */
+/*                                                                           */
+/*                                                                           */
+/*    Based on SCIP  --- Solving Constraint Integer Programs                 */
+/*                                                                           */
+/*    Copyright (C) 2002-2022 Zuse Institute Berlin                          */
+/*                                                                           */
+/*       mailto: scip@zib.de                                                 */
+/*       Licensed under the Apache License, Version 2.0                      */
+/*                                                                           */
+/*                                                                           */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
 /**@file   probdata_rc_conflict.c
  * @brief  Problem data for computing RC using a conflict based model
  * @author Christopher Hojny
@@ -372,7 +395,6 @@ SCIP_RETCODE SCIPcreateConstraints(
    int nY;
    int ub;
    int lb;
-   int dimension;
    int i;
    int j;
    SCIP_VAR** vars;
@@ -391,7 +413,6 @@ SCIP_RETCODE SCIPcreateConstraints(
    nY = probdata->nY;
    ub = probdata->ub;
    lb = probdata->lb;
-   dimension = probdata->dimension;
 
    maxnvars = MAX(2, ub);
 
@@ -478,15 +499,15 @@ SCIP_RETCODE SCIPcreateConstraints(
             int npermvars = 0;
 
             /* turn variable matrix into variable array */
-            SCIP_CALL( SCIPallocBufferArray(scip, &permvars, nY * dimension) );
-            SCIP_CALL( SCIPallocBufferArray(scip, &perm, nY * dimension) );
+            SCIP_CALL( SCIPallocBufferArray(scip, &permvars, nY * ub) );
+            SCIP_CALL( SCIPallocBufferArray(scip, &perm, nY * ub) );
 
             for (i = 0; i < nY; ++i)
             {
-               for (j = 0; j < dimension; ++j)
+               for (j = 0; j < ub; ++j)
                   permvars[npermvars++] = probdata->violatedvars[i][j];
             }
-            assert( npermvars == nY * dimension );
+            assert( npermvars == nY * ub );
 
             SCIP_CALL( SCIPallocBlockMemoryArray(scip, &(probdata->symresackconss), probdata->nperms) );
 
@@ -500,10 +521,10 @@ SCIP_RETCODE SCIPcreateConstraints(
                /* construct corresponding permutation */
                for (j = 0; j < nY; ++j)
                {
-                  for (k = 0; k < dimension; ++k)
-                     perm[npermvars++] = probdata->perms[i][j] * dimension + k;
+                  for (k = 0; k < ub; ++k)
+                     perm[npermvars++] = probdata->perms[i][j] * ub + k;
                }
-               assert( npermvars == nY * dimension );
+               assert( npermvars == nY * ub );
 
                SCIP_CALL( SCIPcreateSymbreakCons(scip, &probdata->symresackconss[i], name, perm, permvars, npermvars,
                      FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE) );
@@ -685,7 +706,16 @@ SCIP_RETCODE SCIPprobdataCreateConflict(
    Datapoints*           Y,                  /**< pointer to data points of Y */
    int*                  ub,                 /**< pointer to upper bound on RC(X,Y) */
    int                   lb,                 /**< lower bound on RC(X,Y) */
-   int                   absmaxX             /**< maximum absolute value of a coordinate in X */
+   int                   absmaxX,            /**< maximum absolute value of a coordinate in X */
+   SCIP_Real**           inequalities,       /**< allocated array to store inequalities (or NULL if not needed) */
+   int**                 separatedpoints,    /**< allocated array to store separated points per inequality
+                                                (or NULL if not needed) */
+   int*                  nseparatedpoints,   /**< allocated array to store number of separated points per inequality
+                                                (or NULL if not needed) */
+   int                   ninequalities,      /**< number of inequalities encoded in previous data structures
+                                                (or -1 if not needed) */
+   int                   maxninequalities    /**< maximum number of inequalities that can be stored
+                                                (if allocated) */
    )
 {
    SCIP_PROBDATA* probdata;
@@ -704,6 +734,9 @@ SCIP_RETCODE SCIPprobdataCreateConflict(
    assert( ub != NULL );
    assert( *ub > 0 );
    assert( absmaxX > 0 );
+   assert( inequalities != NULL || ninequalities == -1 );
+   assert( separatedpoints != NULL || ninequalities == -1 );
+   assert( nseparatedpoints != NULL || ninequalities == -1 );
 
    /* create problem in SCIP and add non-NULL callbacks via setter functions */
    SCIP_CALL( SCIPcreateProbBasic(scip, probname) );
@@ -757,14 +790,22 @@ SCIP_RETCODE SCIPprobdataCreateConflict(
    SCIPfreeBlockMemoryArrayNull(scip, &perms, nmaxperms);
 
    /* compute initial solution */
-   if ( ubcomputed )
+   if ( ubcomputed || ninequalities > 0 )
    {
       SCIP_SOL* sol;
       SCIP_Bool stored;
 
       SCIP_CALL( SCIPcreateOrigSol(scip, &sol, NULL) );
 
-      SCIP_CALL( SCIPgetSolutionConflictModel(scip, probdata, sol, facetsconvexhull) );
+      if ( ubcomputed )
+      {
+         SCIP_CALL( SCIPgetSolutionConflictModelCDD(scip, probdata, sol, facetsconvexhull) );
+      }
+      else
+      {
+         SCIP_CALL( SCIPgetSolutionConflictModelExplicit(scip, probdata, sol, inequalities,
+               separatedpoints, nseparatedpoints, ninequalities) );
+      }
 
       SCIP_CALL( SCIPaddSol(scip, sol, &stored) );
       SCIP_CALL( SCIPfreeSol(scip, &sol) );

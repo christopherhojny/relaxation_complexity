@@ -6,8 +6,8 @@
   *                  This file is part of the program and library             *
   *         SCIP --- Solving Constraint Integer Programs                      *
   *                                                                           *
-  *    Copyright (C) 2002-2021 Konrad-Zuse-Zentrum                            *
-  *                            fuer Informationstechnik Berlin                *
+  *    Copyright (C) 2002-2021 Zuse Institute Berlin                          *
+  *                                                                           *
   *                                                                           *
   *  SCIP is distributed under the terms of the ZIB Academic License.         *
   *                                                                           *
@@ -49,6 +49,7 @@
 #include "cons_samediff.h"
 #include "datapoints.h"
 #include "hiding_sets.h"
+#include "maximal_separation.h"
 #include "pricer_pattern.h"
 #include "probdata_rc_cg.h"
 #include "vardata_binpacking.h"
@@ -631,11 +632,15 @@ static
 SCIP_RETCODE SCIPsolvePricingProblem(
    SCIP*                 scip,               /**< main SCIP instance */
    SCIP*                 subscip,            /**< SCIP instance of pricing problem */
+   Datapoints*           X,                  /**< set of feasible points */
+   int                   nX,                 /**< number of feasible points */
    Datapoints*           Y,                  /**< set of infeasible points */
    int                   nY,                 /**< number of infeasible points */
    int                   dimension,          /**< ambient dimension of infeasible points */
+   int                   absmaxX,            /**< maximum absolute value of coordinate in X */
    SCIP_VAR**            ineqvars,           /**< array of variables encoding inequality defining priced pattern */
    SCIP_CONS**           coverconss,         /**< covering constraints of main problem */
+   SCIP_CONSHDLR*        conshdlr,           /**< constraint handler for branching data */
    SCIP_Bool*            addvar              /**< pointer to store whether a new variable coudl be added */
    )
 {
@@ -647,6 +652,8 @@ SCIP_RETCODE SCIPsolvePricingProblem(
    SCIP_Real* separatedineq;
    SCIP_Real subscipobj;
    SCIP_Real val;
+   SCIP_Real eps;
+   SCIP_Bool maxsepa;
    int* consids;
    int nconss;
    int i;
@@ -659,6 +666,8 @@ SCIP_RETCODE SCIPsolvePricingProblem(
 
    SCIP_CALL( SCIPgetRealParam(scip, "rc/cutoffepsilon", &cutoffbound) );
    SCIP_CALL( SCIPgetIntParam(scip, "rc/maxsolpricer", &sollimit) );
+   SCIP_CALL( SCIPgetBoolParam(scip, "rc/maxsepa", &maxsepa) );
+   SCIP_CALL( SCIPgetRealParam(scip, "rc/epsilon", &eps) );
 
    /* solve sub SCIP to find new patterns/sets for master problem  */
    SCIP_CALL( SCIPsetObjlimit(subscip, 1.0 + cutoffbound) );
@@ -717,7 +726,7 @@ SCIP_RETCODE SCIPsolvePricingProblem(
          val += separatedineq[j+1] * Y->points[i][j];
 
       /* stop, inequality is not violated */
-      if ( SCIPisGE(subscip, val, 0.0) )
+      if ( SCIPisGT(subscip, val, -eps) )
          continue;
 
       consids[nconss++] = i;
@@ -725,6 +734,66 @@ SCIP_RETCODE SCIPsolvePricingProblem(
 
    probdata = SCIPgetProbData(scip);
    assert( probdata != NULL );
+
+   /* possibly search for a maximally separable set */
+   if ( maxsepa )
+   {
+      SCIP_Bool success;
+      SCIP_Longint nodelimit;
+      SCIP_Real* inequ;
+      SCIP_Real timelimit;
+      int* fixed;
+      SCIP_Real* fixedvals;
+      int nfixed = 0;
+      int* viol;
+      int nviol;
+
+      SCIP_CALL( SCIPallocBufferArray(scip, &fixed, Y->ndatapoints) );
+      SCIP_CALL( SCIPallocBufferArray(scip, &fixedvals, Y->ndatapoints) );
+
+      for (i = 0; i < Y->ndatapoints; ++i)
+      {
+         val = separatedineq[0];
+         for (j = 0; j < dimension; ++j)
+            val += separatedineq[j+1] * Y->points[i][j];
+
+         /* stop, inequality is not violated */
+         if ( SCIPisGT(subscip, val, -eps) )
+            continue;
+
+         fixed[nfixed] = i;
+         fixedvals[nfixed++] = 1.0;
+      }
+
+      SCIP_CALL( SCIPgetLongintParam(scip, "rc/pricerimprovenodelimit", &nodelimit) );
+      SCIP_CALL( SCIPgetRealParam(scip, "limits/time", &timelimit) );
+      timelimit -= SCIPgetSolvingTime(scip);
+
+      if ( SCIPisGT(scip, timelimit, 0.0) )
+      {
+         SCIP_CALL( SCIPallocBufferArray(scip, &inequ, X->dimension + 1) );
+         SCIP_CALL( SCIPallocBufferArray(scip, &viol, Y->ndatapoints) );
+         SCIP_CALL( SCIPfindMaximalSeparatingInequality(scip, X, Y, X->ndatapoints, Y->ndatapoints,
+               NULL, X->dimension, absmaxX, fixed, fixedvals, nfixed, viol, &nviol, inequ, conshdlr,
+               nodelimit, timelimit, &success) );
+
+         /* we should at least be able to reproduce the already found inequality */
+         if ( success )
+         {
+            for (i = 0; i <= X->dimension; ++i)
+               separatedineq[i] = inequ[i];
+            for (i = 0; i < nviol; ++i)
+               consids[i] = viol[i];
+            nconss = nviol;
+         }
+
+         SCIPfreeBufferArray(scip, &viol);
+         SCIPfreeBufferArray(scip, &inequ);
+      }
+
+      SCIPfreeBufferArray(scip, &fixedvals);
+      SCIPfreeBufferArray(scip, &fixed);
+   }
 
    (void) SCIPsnprintf(name, SCIP_MAXSTRLEN, "patternvar_%d", SCIPprobdataGetNVars(probdata));
 
@@ -867,8 +936,9 @@ SCIP_DECL_PRICERREDCOST(pricerRedcostPattern)
    SCIP_CALL( changeObjectivePricingProblem(scip, subscip, pricerdata->coverconss, pricerdata->nY, pricerdata->selectvars) );
    SCIP_CALL( addBranchingDecisionConss(scip, subscip, pricerdata->selectvars, pricerdata->conshdlr) );
    SCIP_CALL( addFixedVarsConss(scip, subscip, pricerdata->selectvars, pricerdata->coverconss, pricerdata->Y->ndatapoints) );
-   SCIP_CALL( SCIPsolvePricingProblem(scip, subscip, pricerdata->Y, pricerdata->nY, pricerdata->dimension,
-         pricerdata->ineqvars, pricerdata->coverconss, &addvar) );
+   SCIP_CALL( SCIPsolvePricingProblem(scip, subscip, pricerdata->X, pricerdata->nX, pricerdata->Y, pricerdata->nY,
+         pricerdata->dimension, pricerdata->absmaxX, pricerdata->ineqvars, pricerdata->coverconss, pricerdata->conshdlr,
+         &addvar) );
 
    success = SCIPgetStatus(subscip) == SCIP_STATUS_OPTIMAL;
    success = success || SCIPgetStatus(subscip) == SCIP_STATUS_BESTSOLLIMIT;

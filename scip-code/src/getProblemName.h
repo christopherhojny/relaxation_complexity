@@ -11,11 +11,11 @@
 /*                                                                           */
 /*    Based on SCIP  --- Solving Constraint Integer Programs                 */
 /*                                                                           */
-/*    Copyright (C) 2002-2014 Konrad-Zuse-Zentrum                            */
-/*                            fuer Informationstechnik Berlin                */
+/*    Copyright (C) 2002-2014 Zuse Institute Berlin                          */
+/*                                                                           */
 /*       mailto: scip@zib.de                                                 */
-/*       SCIP is distributed under the terms of the SCIP Academic Licence,   */
-/*       see file COPYING in the SCIP distribution.                          */
+/*       Licensed under the Apache License, Version 2.0                      */
+/*                                                                           */
 /*                                                                           */
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 

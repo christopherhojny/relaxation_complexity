@@ -1,3 +1,26 @@
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/*                                                                           */
+/*    This file is part of the program computeRC                             */
+/*                                                                           */
+/*    an implementation of a branch-and-cut and branch-and-price             */
+/*    algorithm to compute the epsilon relaxation complexity of              */
+/*    a full-dimensional lattice-convex set X and a finite set               */
+/*    of points Y.                                                           */
+/*                                                                           */
+/*    Copyright (C) 2022-     Gennadiy Averkov, Christopher Hojny,           */
+/*                            Matthias Schymura                              */
+/*                                                                           */
+/*                                                                           */
+/*    Based on SCIP  --- Solving Constraint Integer Programs                 */
+/*                                                                           */
+/*    Copyright (C) 2002-2022 Zuse Institute Berlin                          */
+/*                                                                           */
+/*       mailto: scip@zib.de                                                 */
+/*       Licensed under the Apache License, Version 2.0                      */
+/*                                                                           */
+/*                                                                           */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
 /**@file   rcParams.cpp
  * @brief  set up parameters for computing RC
  * @author Christopher Hojny
@@ -19,6 +42,8 @@
 #define DEFAULT_CUTOFFEPSILON               0.0001
 #define DEFAULT_MAXSOLPRICER                     1
 #define DEFAULT_PREPROCESSING                FALSE
+#define DEFAULT_MAXSEPA                      FALSE
+#define DEFAULT_HEURNODELIMIT                 1000
 
 /** Set basic SCIP parameters that are relevant for computing RC */
 extern
@@ -79,6 +104,19 @@ SCIP_RETCODE addRCParameters(
    /* shall we perform preprocessing (remove nonObservers from Y) */
    SCIP_CALL( SCIPaddBoolParam(scip, "rc/preprocessing", "shall we perform preprocessing (remove nonObservers from Y)?",
          NULL, TRUE, DEFAULT_PREPROCESSING, NULL, NULL) );
+
+   /* whether the pricer shall separate maximal sets only  */
+   SCIP_CALL( SCIPaddBoolParam(scip, "rc/maxsepa", "whether the pricer shall separate maximal sets only",
+         NULL, TRUE, DEFAULT_PREPROCESSING, NULL, NULL) );
+
+   /* maximum number of B&B nodes used in heuristics per iteration */
+   SCIP_CALL( SCIPaddLongintParam(scip, "rc/heurnodelimit", "maximum number of B&B nodes used in heuristics per iteration",
+         NULL, TRUE, DEFAULT_HEURNODELIMIT, -1, SCIP_LONGINT_MAX, NULL, NULL) );
+
+   /* maximum number of B&B nodes used in pricing problems to improve separated inequality */
+   SCIP_CALL( SCIPaddLongintParam(scip, "rc/pricerimprovenodelimit",
+         "maximum number of B&B nodes used in pricing problems to improve separated inequality",
+         NULL, TRUE, DEFAULT_HEURNODELIMIT, -1, SCIP_LONGINT_MAX, NULL, NULL) );
 
    return SCIP_OKAY;
 }
