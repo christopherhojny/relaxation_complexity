@@ -1,7 +1,12 @@
-Additional information about the code for the paper
+Additional information about the code for the papers
 
    Computational Aspects of Relaxation Complexity: Possibilities and Limitations
-   by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
+   by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura
+
+   and
+
+   The role of rationality in integer-programming relaxations
+   by Manuel Aprile, Gennadiy Averkov, Marco Di Summa, and Christopher Hojny.
 
 
 I GENERAL INFORMATION
@@ -9,15 +14,22 @@ I GENERAL INFORMATION
 This directory contains scripts to execute computer-aided proofs for Lemma 8 of the article
 
 Computational Aspects of Relaxation Complexity: Possibilities and Limitations
-by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura.
+by Gennadiy Averkov, Christopher Hojny, and Matthias Schymura
 
-To be able to run both scripts, you need a working installation of Sage.
+and Proposition 1 of the article
+
+The role of rationality in integer-programming relaxations
+by Manuel Aprile, Gennadiy Averkov, Marco Di Summa, and Christopher Hojny.
+
+To be able to run the scripts, you need a working installation of Sage.
 Information on how to get and install Sage can be found at
 
 	    https://doc.sagemath.org/html/en/index.html
 
 
 II CALLING THE SCRIPTS
+
+IIa Lemma 8 from "Computational Aspects of Relaxation Complexity: Possibilities and Limitations"
 
 The script
 
@@ -33,3 +45,14 @@ The script
 
 then verifies that the relaxation complexity of the vertex sets of all these polytopes P as
 well as of the standard simplex is 4.
+
+
+IIb Proposition1  from "The role of rationality in integer-programming relaxations"
+
+The script
+
+     	    polyhedral_check_Delta_5.sage
+
+computes all mixed-integer points in the relaxation provided in Proposition 1 and
+prints these points to the terminal. One can then inspect manually that these points
+correspond to the points in the set Delta_5 mentioned in the article.
